@@ -1,5 +1,5 @@
 /** 根组件：路由、导航、锁屏、Toast。 */
-import { createApp, nextTick } from "vue";
+import { createApp, nextTick } from "/vendor/vue.esm-browser.prod.js";
 import { api } from "./api.js";
 import { bus } from "./bus.js";
 import { SetupView, LoginView } from "./views/auth.js";
@@ -154,7 +154,9 @@ function app_mixin(App) {
 }
 
 // Service Worker 注册（localhost / HTTPS 下生效）
-if ("serviceWorker" in navigator && location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1") {
+const secure = location.protocol === "https:";
+const local = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+if ("serviceWorker" in navigator && (secure || local)) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
   });
