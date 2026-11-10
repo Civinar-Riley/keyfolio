@@ -1,0 +1,13 @@
+services:
+  keyfolio:
+    build: .
+    image: keyfolio:latest
+    container_name: keyfolio
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - TZ=Asia/Shanghai
+      # - KEYFOLIO_PORT=3000
