@@ -3,44 +3,87 @@ import { api } from "../api.js";
 
 export const QuickAddView = {
   template: `
-  <div style="max-width:680px; margin:0 auto">
-    <div class="card">
-      <h3>① 粘贴</h3>
-      <p class="hint">把网页上复制的 Base URL / Key（或包含它们的任意文本）粘进来，自动解析。</p>
-      <label class="field"><textarea v-model="raw" placeholder="https://api.example.com/v1  sk-xxxx..." style="min-height:110px"></textarea></label>
-    </div>
+  <div class="intake">
+    <section class="step">
+      <div class="step-marker">01</div>
+      <div>
+        <div class="step-head">
+          <h2>粘贴文本</h2>
+          <p>把网页上复制的 Base URL / Key（或包含它们的任意文本）粘进来，自动解析。</p>
+        </div>
+        <label class="field" style="margin-bottom:0">
+          <textarea class="paste" v-model="raw" aria-label="粘贴文本"
+                    placeholder="https://api.example.com/v1  sk-xxxx..."></textarea>
+        </label>
+        <div class="paste-hints">
+          <span>支持</span>
+          <span class="chip">控制台 Key</span>
+          <span class="chip">curl 命令</span>
+          <span class="chip">.env</span>
+          <span class="chip">JSON 配置</span>
+        </div>
+        <p class="hint" style="margin:12px 0 0">解析在本机完成；点「测一下」时才会请求你填写的 Base URL。</p>
+      </div>
+    </section>
 
-    <div class="card" v-if="parsed">
-      <h3>② 确认字段</h3>
-      <label class="field">渠道名称 <input v-model="form.name" :placeholder="hostHint"></label>
-      <label class="field">类型
-        <select v-model="form.type">
-          <option v-for="t in channelTypes" :key="t.id" :value="t.id">{{ t.label }}</option>
-        </select>
-      </label>
-      <label class="field">Base URL <input v-model="form.base_url"></label>
-      <label class="field">Key <textarea v-model="form.key" style="min-height:64px"></textarea></label>
-      <div v-if="urlCandidates.length > 1" class="hint" style="margin-bottom:6px">
-        其他候选 URL：
-        <a v-for="u in urlCandidates.slice(1)" :key="u" href="#" style="display:block; word-break:break-all" @click.prevent="form.base_url = u">{{ u }}</a>
-      </div>
-      <div v-if="keyCandidates.length > 1" class="hint" style="margin-bottom:6px">
-        其他候选 Key：<code v-for="k in keyCandidates.slice(1)" :key="k" class="mono" style="display:block; word-break:break-all">{{ k }}</code>
-      </div>
-      <div class="btn-row">
-        <button class="btn primary" style="flex:1" :disabled="!form.base_url || !form.key" @click="verify">测一下</button>
-        <button class="btn ok" style="flex:1" :disabled="!form.base_url || !form.key" @click="save">保存入库</button>
-      </div>
-    </div>
+    <section class="step" v-if="parsed">
+      <div class="step-marker">02</div>
+      <div>
+        <div class="step-head">
+          <h2>确认字段</h2>
+          <p>解析结果可直接修改，保存前可以先测一下。</p>
+        </div>
+        <div class="form-grid">
+          <label class="field">渠道名称 <input v-model="form.name" :placeholder="hostHint"></label>
+          <label class="field">类型
+            <select v-model="form.type">
+              <option v-for="t in channelTypes" :key="t.id" :value="t.id">{{ t.label }}</option>
+            </select>
+          </label>
+          <label class="field span-2">Base URL <input v-model="form.base_url"></label>
+          <label class="field span-2">Key <textarea v-model="form.key" style="min-height:64px"></textarea></label>
+        </div>
 
-    <div class="card" v-if="verifyResult">
-      <h3>③ 验证结果</h3>
-      <div v-if="verifyResult.ok" class="badge ok" style="font-size:13px">✓ Key 可用，拉到 {{ verifyResult.models.length }} 个模型</div>
-      <div v-else class="badge fail" style="font-size:13px">✗ {{ verifyResult.error }}</div>
-      <div v-if="verifyResult.ok && verifyResult.models.length" class="hint" style="margin-top:8px; word-break:break-all">
-        {{ verifyResult.models.slice(0, 12).join(" · ") }}{{ verifyResult.models.length > 12 ? " …" : "" }}
+        <div class="candidates" v-if="urlCandidates.length > 1">
+          <div>其他候选 URL</div>
+          <a v-for="u in urlCandidates.slice(1)" :key="u" href="#" @click.prevent="form.base_url = u">{{ u }}</a>
+        </div>
+        <div class="candidates" v-if="keyCandidates.length > 1">
+          <div>其他候选 Key</div>
+          <code class="mono" v-for="k in keyCandidates.slice(1)" :key="k">{{ k }}</code>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn" :disabled="!form.base_url || !form.key" @click="verify">
+            <k-icon name="refresh"></k-icon>测一下
+          </button>
+          <button class="btn primary" :disabled="!form.base_url || !form.key" @click="save">
+            <k-icon name="check"></k-icon>保存入库
+          </button>
+        </div>
       </div>
-    </div>
+    </section>
+
+    <section class="step" v-if="verifyResult">
+      <div class="step-marker">03</div>
+      <div>
+        <div class="step-head">
+          <h2>验证结果</h2>
+          <p>验证只读取模型列表，不消耗额度。</p>
+        </div>
+        <div class="result-banner" :class="verifyResult.ok ? 'ok' : 'fail'">
+          <k-icon :name="verifyResult.ok ? 'check' : 'alert'"></k-icon>
+          <div>
+            <div v-if="verifyResult.ok">Key 可用，拉到 {{ verifyResult.models.length }} 个模型</div>
+            <div v-else>{{ verifyResult.error }}</div>
+          </div>
+        </div>
+        <div class="result-models" v-if="verifyResult.ok && verifyResult.models.length">
+          <span class="chip" v-for="m in verifyResult.models.slice(0, 12)" :key="m">{{ m }}</span>
+          <span class="chip" v-if="verifyResult.models.length > 12">+{{ verifyResult.models.length - 12 }}</span>
+        </div>
+      </div>
+    </section>
   </div>`,
   data: () => ({
     raw: "", parsed: null,

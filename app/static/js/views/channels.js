@@ -7,146 +7,203 @@ export const ChannelsView = {
   template: `
   <div>
     <div class="split">
-      <!-- 左列：渠道列表 -->
-      <div class="list-col" v-if="!isMobile || !detailOpen">
-        <div class="btn-row">
-          <button class="btn primary" style="flex:1" @click="openChannelForm(null)">＋ 新渠道</button>
-        </div>
-        <label class="field" style="margin:0">
-          <input v-model="filter" placeholder="搜索名称 / URL / 分组">
-        </label>
-        <div v-for="c in filtered" :key="c.id" class="chan-item" :class="{active: c.id===selectedId}" @click="select(c.id)">
-          <div class="name">
-            {{ c.name }}
-            <span class="badge acc">{{ typeLabel(c.type) }}</span>
-            <span class="badge" v-if="c.grp">{{ c.grp }}</span>
-            <span class="badge" :class="c.enabled ? 'ok' : 'warn'">{{ c.enabled ? "启用" : "停用" }}</span>
+      <!-- 左列：渠道索引 -->
+      <aside class="index-col" v-if="!isMobile || !detailOpen">
+        <div class="index-tools">
+          <button class="btn primary block" @click="openChannelForm(null)">
+            <k-icon name="plus"></k-icon>新渠道
+          </button>
+          <div class="search-box">
+            <k-icon name="search"></k-icon>
+            <input v-model="filter" placeholder="搜索名称 / URL / 分组" aria-label="搜索渠道">
           </div>
-          <div class="meta">{{ c.base_url }}</div>
-          <div class="meta">{{ c.keys.length }} 个 Key · {{ c.models_enabled || 0 }}/{{ c.models_count }} 个模型</div>
         </div>
-        <div class="hint" v-if="!filtered.length" style="text-align:center; padding:30px 0">
-          还没有渠道，点上面"＋ 新渠道"开始
+        <div class="chan-list">
+          <button type="button" class="chan-item" v-for="c in filtered" :key="c.id"
+                  :class="{active: c.id===selectedId}" @click="select(c.id)">
+            <span class="chan-top">
+              <span class="chan-name">{{ c.name }}</span>
+              <span class="badge acc">{{ typeLabel(c.type) }}</span>
+              <span class="badge" v-if="c.grp">{{ c.grp }}</span>
+            </span>
+            <span class="chan-url">{{ c.base_url }}</span>
+            <span class="chan-meta">
+              <span>{{ c.keys.length }} Key</span>
+              <span class="sep">/</span>
+              <span>{{ c.models_enabled || 0 }}/{{ c.models_count }} 模型</span>
+              <span class="badge dot" :class="c.enabled ? 'ok' : 'warn'">{{ c.enabled ? "启用" : "停用" }}</span>
+            </span>
+          </button>
+          <div class="chan-empty" v-if="!filtered.length">
+            还没有渠道，点上方「新渠道」开始
+          </div>
         </div>
-      </div>
+      </aside>
 
-      <!-- 右列：详情 -->
-      <div v-if="detail">
-        <div class="btn-row" style="margin-bottom:10px">
-          <button class="btn sm" v-if="isMobile" @click="detailOpen=false">← 返回列表</button>
-          <button class="btn sm" @click="openChannelForm(detail)">编辑</button>
-          <a class="btn sm" v-if="detail.console_url" :href="detail.console_url" target="_blank" rel="noopener">控制台 ↗</a>
-          <button class="btn sm danger" @click="removeChannel(detail)">删除渠道</button>
-        </div>
-        <div class="card">
-          <h3>{{ detail.name }}
-            <span class="badge acc">{{ typeLabel(detail.type) }}</span>
-            <span class="badge" :class="detail.enabled ? 'ok' : 'warn'">{{ detail.enabled ? "启用" : "停用" }}</span>
-          </h3>
-          <div class="mono" style="word-break:break-all">{{ detail.base_url }}</div>
-          <div class="hint" v-if="detail.notes">{{ detail.notes }}</div>
-        </div>
+      <!-- 右列：渠道详情 -->
+      <section v-if="detail">
+        <header class="detail-head">
+          <div class="detail-title">
+            <h2>{{ detail.name }}</h2>
+            <div class="detail-badges">
+              <span class="badge acc">{{ typeLabel(detail.type) }}</span>
+              <span class="badge" v-if="detail.grp">{{ detail.grp }}</span>
+              <span class="badge dot" :class="detail.enabled ? 'ok' : 'warn'">{{ detail.enabled ? "启用" : "停用" }}</span>
+            </div>
+            <div class="mono detail-url">{{ detail.base_url }}</div>
+            <div class="detail-notes" v-if="detail.notes">{{ detail.notes }}</div>
+          </div>
+          <div class="detail-actions">
+            <button class="btn sm" v-if="isMobile" @click="detailOpen=false">
+              <k-icon name="arrow-left"></k-icon>返回
+            </button>
+            <button class="btn sm" @click="openChannelForm(detail)">
+              <k-icon name="edit"></k-icon>编辑
+            </button>
+            <a class="btn sm" v-if="detail.console_url" :href="detail.console_url" target="_blank" rel="noopener">
+              <k-icon name="external"></k-icon>控制台
+            </a>
+            <button class="btn sm danger" @click="removeChannel(detail)">
+              <k-icon name="trash"></k-icon>删除
+            </button>
+          </div>
+        </header>
 
-        <div class="card">
-          <h3>Keys（{{ detail.keys.length }}）
-            <button class="btn sm primary" style="float:right" @click="openKeyForm(null)">＋ 添加 Key</button>
-          </h3>
-          <div class="key-row" v-for="k in detail.keys" :key="k.id">
-            <div class="grow">
-              <div class="key-name">{{ k.name }}
-                <span class="badge" v-if="!k.enabled">停用</span>
-                <span class="badge" :class="expiryOf(k).cls" v-if="expiryOf(k)">{{ expiryOf(k).text }}</span>
-                <span class="badge" :class="k.last_check==='ok' ? 'ok' : (k.last_check==='fail' ? 'fail' : '')"
-                      v-if="k.last_check" :title="k.last_check_msg">
-                  {{ k.last_check==='ok' ? "✓ 可用" : "✗ 异常" }}
-                </span>
-              </div>
-              <div class="mono" style="color:var(--muted)">
-                {{ revealed[k.id] || k.value_masked }}
-                <a href="#" style="margin-left:6px" @click.prevent="toggleReveal(k)">{{ revealed[k.id] ? "隐藏" : "显示" }}</a>
-              </div>
-              <div class="hint" v-if="k.last_check_msg">{{ k.last_check_msg }}</div>
+        <section class="sheet">
+          <header class="sheet-head">
+            <div>
+              <h2>Keys <span class="count">{{ detail.keys.length }}</span></h2>
+              <p>Key 值加密保存在本机</p>
             </div>
-            <div class="key-balance">
-              <div class="amt">{{ fmtBalance(k) }}</div>
-              <div class="hint">{{ fmtTime(k.balance_updated_at) }}</div>
+            <button class="btn sm primary" @click="openKeyForm(null)">
+              <k-icon name="plus"></k-icon>添加 Key
+            </button>
+          </header>
+          <div class="sheet-body" v-if="detail.keys.length">
+            <div class="key-item" v-for="k in detail.keys" :key="k.id">
+              <div class="key-line">
+                <div class="key-info">
+                  <div class="key-name">
+                    {{ k.name }}
+                    <span class="badge" v-if="!k.enabled">停用</span>
+                    <span class="badge" :class="expiryOf(k).cls" v-if="expiryOf(k)">{{ expiryOf(k).text }}</span>
+                    <span class="badge dot" :class="k.last_check==='ok' ? 'ok' : (k.last_check==='fail' ? 'fail' : '')"
+                          v-if="k.last_check" :title="k.last_check_msg">
+                      {{ k.last_check==='ok' ? "可用" : "异常" }}
+                    </span>
+                  </div>
+                  <div class="key-secret mono">
+                    {{ revealed[k.id] || k.value_masked }}
+                    <a href="#" @click.prevent="toggleReveal(k)">{{ revealed[k.id] ? "隐藏" : "显示" }}</a>
+                  </div>
+                  <div class="key-msg" v-if="k.last_check_msg">{{ k.last_check_msg }}</div>
+                </div>
+                <div class="key-amount">
+                  <div class="amt">{{ fmtBalance(k) }}</div>
+                  <div class="hint">{{ fmtTime(k.balance_updated_at) }}</div>
+                </div>
+              </div>
+              <div class="key-actions">
+                <button class="btn sm ok" @click="copyConfig(k.id)"><k-icon name="copy"></k-icon>复制配置</button>
+                <button class="btn sm" @click="verifyKey(k.id, 'models')"><k-icon name="refresh"></k-icon>测 Key</button>
+                <button class="btn sm" @click="chatTest(k.id)">测对话</button>
+                <button class="btn sm" @click="checkBalance(k.id)">查余额</button>
+                <button class="btn sm" @click="openBalanceManual(k)">填余额</button>
+                <button class="btn sm" @click="openKeyForm(k)">编辑</button>
+                <button class="btn sm danger" @click="removeKey(k)" aria-label="删除 Key"><k-icon name="trash"></k-icon></button>
+              </div>
             </div>
           </div>
-          <div class="btn-row" style="margin-top:10px" v-if="detail.keys.length">
-            <button class="btn sm" @click="verifyAll()">全部测 Key</button>
-            <button class="btn sm" @click="checkAllBalance()">全部查余额</button>
+          <div class="empty" v-else style="padding:36px 20px">
+            <p style="margin:0">还没有 Key，点「添加 Key」录入。</p>
           </div>
-          <div class="key-row" v-for="k in detail.keys" :key="'ops'+k.id" style="padding-top:4px">
+          <footer class="sheet-foot" v-if="detail.keys.length">
+            <div class="key-tools">
+              <button class="btn sm" @click="verifyAll()">全部测 Key</button>
+              <button class="btn sm" @click="checkAllBalance()">全部查余额</button>
+            </div>
+          </footer>
+        </section>
+
+        <section class="sheet">
+          <header class="sheet-head">
+            <div>
+              <h2>模型 <span class="count">{{ enabledModelCount }} / {{ models.length }}</span></h2>
+              <p>启用的模型会出现在导出配置里</p>
+            </div>
             <div class="btn-row">
-              <button class="btn sm ok" @click="copyConfig(k.id)">复制配置</button>
-              <button class="btn sm" @click="verifyKey(k.id, 'models')">测 Key</button>
-              <button class="btn sm" @click="chatTest(k.id)">测对话</button>
-              <button class="btn sm" @click="checkBalance(k.id)">查余额</button>
-              <button class="btn sm" @click="openBalanceManual(k)">填余额</button>
-              <button class="btn sm" @click="openKeyForm(k)">编辑</button>
-              <button class="btn sm danger" @click="removeKey(k)">删</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="card">
-          <h3>模型（{{ enabledModelCount }} / {{ models.length }} 启用）
-            <span class="btn-row" style="float:right">
-              <button class="btn sm primary" @click="fetchModels()">拉取模型</button>
+              <button class="btn sm primary" @click="fetchModels()"><k-icon name="refresh"></k-icon>拉取模型</button>
               <button class="btn sm" @click="pasteOpen=true">粘贴 JSON</button>
               <button class="btn sm" @click="modelFormOpen=true">手动添加</button>
-            </span>
-          </h3>
-          <label class="field" v-if="models.length" style="max-width:280px; margin:0 0 8px">
-            <input v-model="modelQuery" placeholder="筛选模型 ID">
-          </label>
-          <table class="list" v-if="filteredModels.length">
-            <thead><tr><th>模型 ID</th><th>类型</th><th>状态</th><th></th></tr></thead>
-            <tbody>
-              <tr v-for="m in filteredModels" :key="m.id">
-                <td class="mono">{{ m.model_id }}</td>
-                <td>
-                  <select :value="m.mtype" @change="updateModel(m, {mtype: $event.target.value})">
-                    <option v-for="t in modelTypes" :key="t" :value="t">{{ t }}</option>
-                  </select>
-                </td>
-                <td><span class="badge" :class="m.enabled ? 'ok' : 'warn'">{{ m.enabled ? "启用" : "停用" }}</span></td>
-                <td>
-                  <button class="btn sm" @click="updateModel(m, {enabled: !m.enabled})">{{ m.enabled ? "停用" : "启用" }}</button>
-                  <button class="btn sm danger" @click="deleteModel(m)">删</button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          <div class="hint" v-else-if="models.length">没有匹配的模型。</div>
-          <div class="hint" v-else>还没有模型。用"拉取模型"从平台同步，或手动添加。</div>
-        </div>
-      </div>
-      <div class="hint" v-else-if="!isMobile" style="padding:40px; text-align:center;">
-        ← 从左侧选择一个渠道
-      </div>
+            </div>
+          </header>
+          <div class="sheet-body">
+            <div class="search-box" v-if="models.length" style="max-width:280px; margin-bottom:12px">
+              <k-icon name="search"></k-icon>
+              <input v-model="modelQuery" placeholder="筛选模型 ID" aria-label="筛选模型">
+            </div>
+            <table class="list" v-if="filteredModels.length">
+              <thead><tr><th>模型 ID</th><th>类型</th><th>状态</th><th></th></tr></thead>
+              <tbody>
+                <tr v-for="m in filteredModels" :key="m.id">
+                  <td class="mono">{{ m.model_id }}</td>
+                  <td>
+                    <select :value="m.mtype" @change="updateModel(m, {mtype: $event.target.value})">
+                      <option v-for="t in modelTypes" :key="t" :value="t">{{ t }}</option>
+                    </select>
+                  </td>
+                  <td><span class="badge dot" :class="m.enabled ? 'ok' : 'warn'">{{ m.enabled ? "启用" : "停用" }}</span></td>
+                  <td>
+                    <div class="btn-row" style="justify-content:flex-end">
+                      <button class="btn sm" @click="updateModel(m, {enabled: !m.enabled})">{{ m.enabled ? "停用" : "启用" }}</button>
+                      <button class="btn sm danger" @click="deleteModel(m)">删</button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="empty" v-else-if="models.length" style="padding:26px 10px">
+              <p style="margin:0">没有匹配的模型</p>
+            </div>
+            <div class="empty" v-else style="padding:32px 10px">
+              <p style="margin:0 0 4px">还没有模型</p>
+              <p style="margin:0; font-size:11.5px">用「拉取模型」从平台同步，或手动添加。</p>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <section class="detail-empty" v-else-if="!isMobile">
+        <k-icon name="channels"></k-icon>
+        <p>从左侧选择一个渠道</p>
+      </section>
     </div>
 
     <!-- 渠道表单 -->
     <div class="modal-mask" v-if="chanForm" @click.self="chanForm=null">
       <div class="modal">
-        <h3>{{ chanForm.id ? "编辑渠道" : "新渠道" }}</h3>
+        <div class="modal-head">
+          <h3>{{ chanForm.id ? "编辑渠道" : "新渠道" }}</h3>
+          <button class="icon-btn" @click="chanForm=null" aria-label="关闭"><k-icon name="x"></k-icon></button>
+        </div>
         <label class="field" v-if="providers.length">预设（可选）
           <select v-model="preset" @change="applyPreset">
             <option value="">自定义</option>
             <option v-for="p in providers" :key="p.type + '|' + p.base_url" :value="p.type + '|' + p.base_url">{{ p.name }}</option>
           </select>
         </label>
-        <label class="field">名称 <input v-model="chanForm.name" placeholder="如 DeepSeek 官方"></label>
-        <label class="field">类型
-          <select v-model="chanForm.type">
-            <option v-for="t in channelTypes" :key="t.id" :value="t.id">{{ t.label }}</option>
-          </select>
-        </label>
-        <label class="field">Base URL <input v-model="chanForm.base_url" placeholder="https://api.example.com"></label>
-        <label class="field">控制台地址 <input v-model="chanForm.console_url" placeholder="可选，快捷打开"></label>
-        <label class="field">分组 <input v-model="chanForm.grp" placeholder="可选"></label>
-        <label class="field">备注 <textarea v-model="chanForm.notes"></textarea></label>
+        <div class="form-grid">
+          <label class="field">名称 <input v-model="chanForm.name" placeholder="如 DeepSeek 官方"></label>
+          <label class="field">类型
+            <select v-model="chanForm.type">
+              <option v-for="t in channelTypes" :key="t.id" :value="t.id">{{ t.label }}</option>
+            </select>
+          </label>
+          <label class="field span-2">Base URL <input v-model="chanForm.base_url" placeholder="https://api.example.com"></label>
+          <label class="field">控制台地址 <input v-model="chanForm.console_url" placeholder="可选，快捷打开"></label>
+          <label class="field">分组 <input v-model="chanForm.grp" placeholder="可选"></label>
+          <label class="field span-2">备注 <textarea v-model="chanForm.notes"></textarea></label>
+        </div>
         <label class="field" style="display:flex; align-items:center; gap:8px">
           <input type="checkbox" v-model="chanForm.enabled" style="width:auto; margin:0"> 启用
         </label>
@@ -160,11 +217,18 @@ export const ChannelsView = {
     <!-- Key 表单 -->
     <div class="modal-mask" v-if="keyForm" @click.self="keyForm=null">
       <div class="modal">
-        <h3>{{ keyForm.id ? "编辑 Key" : "添加 Key" }}</h3>
-        <label class="field">名称 <input v-model="keyForm.name" placeholder="如 主 Key"></label>
-        <label class="field">Key 值 <textarea v-model="keyForm.value" :placeholder="keyForm.id ? '留空则不修改' : 'sk-...'" style="min-height:70px"></textarea></label>
-        <label class="field">到期日（可选） <input v-model="keyForm.expires_at" placeholder="如 2026-12-31"></label>
-        <label class="field">备注 <input v-model="keyForm.notes"></label>
+        <div class="modal-head">
+          <h3>{{ keyForm.id ? "编辑 Key" : "添加 Key" }}</h3>
+          <button class="icon-btn" @click="keyForm=null" aria-label="关闭"><k-icon name="x"></k-icon></button>
+        </div>
+        <div class="form-grid">
+          <label class="field span-2">名称 <input v-model="keyForm.name" placeholder="如 主 Key"></label>
+          <label class="field span-2">Key 值
+            <textarea v-model="keyForm.value" :placeholder="keyForm.id ? '留空则不修改' : 'sk-...'" style="min-height:70px"></textarea>
+          </label>
+          <label class="field">到期日（可选） <input v-model="keyForm.expires_at" placeholder="如 2026-12-31"></label>
+          <label class="field">备注 <input v-model="keyForm.notes"></label>
+        </div>
         <label class="field" style="display:flex; align-items:center; gap:8px">
           <input type="checkbox" v-model="keyForm.enabled" style="width:auto; margin:0"> 启用
         </label>
@@ -178,10 +242,15 @@ export const ChannelsView = {
     <!-- 手动余额 -->
     <div class="modal-mask" v-if="balForm" @click.self="balForm=null">
       <div class="modal">
-        <h3>手动填写余额（{{ balKeyName }}）</h3>
-        <label class="field">余额 <input type="number" step="any" v-model="balForm.balance"></label>
-        <label class="field">币种 <input v-model="balForm.currency" placeholder="CNY / USD"></label>
-        <label class="field">到期日 <input v-model="balForm.expires_at" placeholder="可选，如 2026-12-31"></label>
+        <div class="modal-head">
+          <h3>手动填写余额 · {{ balKeyName }}</h3>
+          <button class="icon-btn" @click="balForm=null" aria-label="关闭"><k-icon name="x"></k-icon></button>
+        </div>
+        <div class="form-grid">
+          <label class="field">余额 <input type="number" step="any" v-model="balForm.balance"></label>
+          <label class="field">币种 <input v-model="balForm.currency" placeholder="CNY / USD"></label>
+          <label class="field span-2">到期日 <input v-model="balForm.expires_at" placeholder="可选，如 2026-12-31"></label>
+        </div>
         <div class="btn-row">
           <button class="btn primary" style="flex:1" @click="saveBalance">保存</button>
           <button class="btn" @click="balForm=null">取消</button>
@@ -192,8 +261,11 @@ export const ChannelsView = {
     <!-- 粘贴 JSON -->
     <div class="modal-mask" v-if="pasteOpen" @click.self="pasteOpen=false">
       <div class="modal">
-        <h3>粘贴模型列表</h3>
-        <p class="hint">支持字符串数组、OpenAI 返回体（data[].id）、每行一个</p>
+        <div class="modal-head">
+          <h3>粘贴模型列表</h3>
+          <button class="icon-btn" @click="pasteOpen=false" aria-label="关闭"><k-icon name="x"></k-icon></button>
+        </div>
+        <p class="hint" style="margin-bottom:12px">支持字符串数组、OpenAI 返回体（data[].id）、每行一个。</p>
         <label class="field"><textarea v-model="pasteText" style="min-height:140px"></textarea></label>
         <div v-if="pasteIds.length" class="hint" style="margin-bottom:8px">解析出 {{ pasteIds.length }} 个模型 ID</div>
         <div class="btn-row">
@@ -206,7 +278,10 @@ export const ChannelsView = {
     <!-- 手动添加模型 -->
     <div class="modal-mask" v-if="modelFormOpen" @click.self="modelFormOpen=false">
       <div class="modal">
-        <h3>手动添加模型</h3>
+        <div class="modal-head">
+          <h3>手动添加模型</h3>
+          <button class="icon-btn" @click="modelFormOpen=false" aria-label="关闭"><k-icon name="x"></k-icon></button>
+        </div>
         <label class="field">模型 ID <input v-model="newModelId" placeholder="如 gpt-4o-mini"></label>
         <div class="btn-row">
           <button class="btn primary" style="flex:1" :disabled="!newModelId" @click="addManualModel">添加</button>
@@ -218,7 +293,10 @@ export const ChannelsView = {
     <!-- 同步 diff 确认 -->
     <div class="modal-mask" v-if="diff" @click.self="diff=null">
       <div class="modal">
-        <h3>模型同步确认（远端 {{ diff.remote_count }} 个）</h3>
+        <div class="modal-head">
+          <h3>同步模型 · 远端 {{ diff.remote_count }} 个</h3>
+          <button class="icon-btn" @click="diff=null" aria-label="关闭"><k-icon name="x"></k-icon></button>
+        </div>
         <template v-if="diff.added.length">
           <h3 class="diff-add">新增（{{ diff.added.length }}）</h3>
           <ul class="diff-list">
@@ -283,7 +361,7 @@ export const ChannelsView = {
   async created() {
     window.matchMedia("(max-width: 767px)").addEventListener("change", e => { this.isMobile = e.matches; });
     await this.load();
-    if (this.channels.length && !this.selectedId) this.select(this.channels[0].id);
+    if (!this.isMobile && this.channels.length && !this.selectedId) this.select(this.channels[0].id);
   },
   methods: {
     fmtBalance, fmtTime,

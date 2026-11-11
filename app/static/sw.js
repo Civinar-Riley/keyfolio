@@ -1,11 +1,12 @@
 /* Keyfolio Service Worker：静态资源 cache-first，API 永远走网络。 */
-const CACHE = "keyfolio-v2";
+const CACHE = "keyfolio-v3";
 const PRECACHE = [
   "/",
   "/css/app.css",
   "/js/app.js",
   "/js/api.js",
   "/js/bus.js",
+  "/js/icons.js",
   "/js/views/auth.js",
   "/js/views/channels.js",
   "/js/views/dashboard.js",
@@ -15,8 +16,11 @@ const PRECACHE = [
   "/vendor/vue.esm-browser.prod.js",
   "/vendor/chart.umd.js",
   "/manifest.webmanifest",
+  "/icons/icon-32.png",
+  "/icons/icon-180.png",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
+  "/icons/icon-maskable-512.png",
 ];
 
 self.addEventListener("install", (event) => {

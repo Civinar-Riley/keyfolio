@@ -4,82 +4,111 @@ import { api, copyText } from "../api.js";
 export const SettingsView = {
   emits: ["lock", "logout"],
   template: `
-  <div style="max-width:760px; margin:0 auto">
-    <div class="card">
-      <h3>安全</h3>
-      <div class="btn-row">
-        <button class="btn" @click="$emit('lock')">🔒 锁屏</button>
-        <button class="btn danger" @click="logout">登出</button>
-      </div>
-    </div>
-
-    <div class="card">
-      <h3>修改主密码</h3>
-      <label class="field">原密码 <input type="password" v-model="pw.old"></label>
-      <label class="field">新密码（至少 8 位） <input type="password" v-model="pw.new1"></label>
-      <label class="field">确认新密码 <input type="password" v-model="pw.new2"></label>
-      <button class="btn primary" :disabled="busy || !pw.old || pw.new1.length < 8 || pw.new1 !== pw.new2" @click="changePassword">修改</button>
-      <p class="hint" style="margin-top:8px">改密码只重新包裹加密密钥，Key 数据无需重新加密。恢复码不变；其他设备上的会话会退出。</p>
-    </div>
-
-    <div class="card">
-      <h3>两步验证（TOTP）</h3>
-      <template v-if="!s.totp_enabled">
-        <p class="hint">用验证器 App（Google Authenticator / 1Password 等）扫码绑定。</p>
-        <button class="btn primary" :disabled="busy" @click="totpStart">开始绑定</button>
-        <div v-if="totpSetup" style="margin-top:12px">
-          <div class="qr-box" v-html="totpSetup.qr_svg"></div>
-          <p class="hint" style="text-align:center; word-break:break-all">密钥：{{ totpSetup.secret }}</p>
-          <label class="field">输入 6 位验证码确认 <input v-model="totpCode" inputmode="numeric" maxlength="8"></label>
-          <button class="btn primary" :disabled="totpCode.length < 6" @click="totpConfirm">确认开启</button>
-        </div>
-      </template>
-      <template v-else>
-        <p><span class="badge ok">已开启</span> 登录时需输入验证码，备用码可代替。</p>
+  <div class="settings-narrow">
+    <section class="sheet">
+      <header class="sheet-head">
+        <div><h2>安全</h2><p>锁屏后数据接口暂停响应，刷新页面也保持锁定。</p></div>
+      </header>
+      <div class="sheet-body">
         <div class="btn-row">
-          <button class="btn" @click="op = op === 'regen' ? '' : 'regen'">重新生成备用码</button>
-          <button class="btn danger" @click="op = op === 'off' ? '' : 'off'">关闭 TOTP</button>
+          <button class="btn" @click="$emit('lock')"><k-icon name="lock"></k-icon>锁屏</button>
+          <button class="btn danger" @click="logout"><k-icon name="logout"></k-icon>登出</button>
         </div>
-        <div v-if="op" style="margin-top:10px">
-          <label class="field">输入主密码确认
-            <input type="password" v-model="opPw" @keyup.enter="op === 'regen' ? regenCodes() : doTotpOff()">
+      </div>
+    </section>
+
+    <section class="sheet">
+      <header class="sheet-head">
+        <div><h2>修改主密码</h2><p>只重新包裹加密密钥，Key 数据无需重新加密。</p></div>
+      </header>
+      <div class="sheet-body">
+        <label class="field">原密码 <input type="password" v-model="pw.old"></label>
+        <label class="field">新密码（至少 8 位） <input type="password" v-model="pw.new1"></label>
+        <label class="field">确认新密码 <input type="password" v-model="pw.new2"></label>
+        <button class="btn primary" :disabled="busy || !pw.old || pw.new1.length < 8 || pw.new1 !== pw.new2" @click="changePassword">修改</button>
+        <p class="hint" style="margin:12px 0 0">恢复码不变；其他设备上的会话会退出。</p>
+      </div>
+    </section>
+
+    <section class="sheet">
+      <header class="sheet-head">
+        <div><h2>两步验证（TOTP）</h2><p>用验证器 App（Google Authenticator / 1Password 等）扫码绑定。</p></div>
+      </header>
+      <div class="sheet-body">
+        <template v-if="!s.totp_enabled">
+          <button class="btn primary" :disabled="busy" @click="totpStart">开始绑定</button>
+          <div v-if="totpSetup" style="margin-top:16px">
+            <div class="qr-box" v-html="totpSetup.qr_svg"></div>
+            <p class="hint" style="text-align:center; word-break:break-all">密钥：{{ totpSetup.secret }}</p>
+            <label class="field">输入 6 位验证码确认
+              <input v-model="totpCode" inputmode="numeric" maxlength="8">
+            </label>
+            <button class="btn primary" :disabled="totpCode.length < 6" @click="totpConfirm">确认开启</button>
+          </div>
+        </template>
+        <template v-else>
+          <p style="margin:0 0 14px"><span class="badge ok">已开启</span> 登录时需输入验证码，备用码可代替。</p>
+          <div class="btn-row">
+            <button class="btn" @click="op = op === 'regen' ? '' : 'regen'">重新生成备用码</button>
+            <button class="btn danger" @click="op = op === 'off' ? '' : 'off'">关闭 TOTP</button>
+          </div>
+          <div v-if="op" style="margin-top:12px; max-width:360px">
+            <label class="field">输入主密码确认
+              <input type="password" v-model="opPw" @keyup.enter="op === 'regen' ? regenCodes() : doTotpOff()">
+            </label>
+            <button class="btn" :class="op === 'off' ? 'danger' : 'primary'" :disabled="!opPw"
+                    @click="op === 'regen' ? regenCodes() : doTotpOff()">
+              {{ op === 'regen' ? "生成新备用码" : "确认关闭" }}
+            </button>
+          </div>
+        </template>
+        <div v-if="backupCodes.length">
+          <h3 style="margin:18px 0 0">备用码（只显示这一次）</h3>
+          <div class="codes-grid"><code v-for="c in backupCodes" :key="c">{{ c }}</code></div>
+          <button class="btn sm" @click="copyCodes">复制全部备用码</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="sheet">
+      <header class="sheet-head">
+        <div><h2>定时任务</h2><p>服务在线时按间隔自动查余额、同步模型。</p></div>
+      </header>
+      <div class="sheet-body">
+        <label class="field" style="display:flex; align-items:center; gap:8px">
+          <input type="checkbox" v-model="sched.enabled" style="width:auto; margin:0"> 启用
+        </label>
+        <div class="form-grid">
+          <label class="field">查余额间隔（小时，0 = 关闭）
+            <input type="number" min="0" step="0.5" v-model="sched.balance_interval_hours">
           </label>
-          <button class="btn" :class="op === 'off' ? 'danger' : 'primary'" :disabled="!opPw" @click="op === 'regen' ? regenCodes() : doTotpOff()">
-            {{ op === 'regen' ? "生成新备用码" : "确认关闭" }}
-          </button>
+          <label class="field">同步模型间隔（小时，0 = 关闭）
+            <input type="number" min="0" step="0.5" v-model="sched.model_interval_hours">
+          </label>
         </div>
-      </template>
-      <div v-if="backupCodes.length">
-        <h3 style="margin-top:12px">备用码（只显示这一次）</h3>
-        <div class="codes-grid"><code v-for="c in backupCodes" :key="c">{{ c }}</code></div>
-        <button class="btn sm" @click="copyCodes">复制全部备用码</button>
+        <button class="btn primary" @click="saveSched">保存</button>
+        <p class="hint" style="margin:12px 0 0">
+          定时同步只自动新增模型，不会删除或停用已有模型。上次执行：余额 {{ ts(s.last_balance_run) }} · 模型 {{ ts(s.last_models_run) }}
+        </p>
       </div>
-    </div>
+    </section>
 
-    <div class="card">
-      <h3>定时任务</h3>
-      <label class="field" style="display:flex; align-items:center; gap:8px">
-        <input type="checkbox" v-model="sched.enabled" style="width:auto; margin:0"> 启用（服务在线时自动执行）
-      </label>
-      <label class="field">自动查余额间隔（小时，0 = 关闭） <input type="number" min="0" step="0.5" v-model="sched.balance_interval_hours"></label>
-      <label class="field">自动同步模型间隔（小时，0 = 关闭） <input type="number" min="0" step="0.5" v-model="sched.model_interval_hours"></label>
-      <button class="btn primary" @click="saveSched">保存</button>
-      <p class="hint" style="margin-top:8px">定时同步只自动新增模型，不会删除/停用已有模型。上次执行：余额 {{ ts(s.last_balance_run) }} · 模型 {{ ts(s.last_models_run) }}</p>
-    </div>
+    <section class="sheet">
+      <header class="sheet-head">
+        <div><h2>备份与恢复</h2><p>全量导出渠道、Key、模型、余额历史、模板与登录凭证。</p></div>
+      </header>
+      <div class="sheet-body">
+        <div class="btn-row">
+          <button class="btn primary" @click="exportBackup"><k-icon name="download"></k-icon>导出备份（明文）</button>
+          <button class="btn" @click="encOpen = !encOpen">加密导出…</button>
+        </div>
+        <div v-if="encOpen" class="inline-form" style="margin-top:12px">
+          <label class="field">备份加密密码 <input type="password" v-model="encPw" placeholder="至少 8 位"></label>
+          <button class="btn primary" :disabled="encPw.length < 8" @click="exportEncrypted">导出加密备份</button>
+        </div>
 
-    <div class="card">
-      <h3>备份与恢复</h3>
-      <p class="hint">全量导出渠道、Key、模型、余额历史、模板与登录凭证。</p>
-      <div class="btn-row">
-        <button class="btn primary" @click="exportBackup">导出备份（明文）</button>
-        <button class="btn" @click="encOpen = !encOpen">加密导出…</button>
-      </div>
-      <div v-if="encOpen" class="inline-form" style="margin-top:10px">
-        <label class="field">备份加密密码 <input type="password" v-model="encPw" placeholder="至少 8 位"></label>
-        <button class="btn primary" :disabled="encPw.length < 8" @click="exportEncrypted">导出加密备份</button>
-      </div>
+        <div class="divider"></div>
 
-      <div style="margin-top:16px; border-top:1px solid var(--border); padding-top:14px">
         <label class="field">导入备份文件 <input type="file" accept=".json" @change="pickFile"></label>
         <template v-if="importFile">
           <p class="hint">文件：{{ importFile.name }}（{{ importFile.size }} bytes，{{ importData?.encrypted ? "加密备份" : "明文备份" }}）</p>
@@ -91,23 +120,27 @@ export const SettingsView = {
           </label>
           <label class="field" v-if="importData?.encrypted">备份密码 <input type="password" v-model="importPw"></label>
           <button class="btn danger" :disabled="importMode==='overwrite' && !confirmOverwrite" @click="doImport">
-            {{ importMode === "overwrite" ? "确认覆盖导入" : "开始合并导入" }}
+            <k-icon name="download"></k-icon>{{ importMode === "overwrite" ? "确认覆盖导入" : "开始合并导入" }}
           </button>
-          <label class="field" v-if="importMode==='overwrite'" style="display:flex; align-items:center; gap:8px; margin-top:8px">
+          <label class="field" v-if="importMode==='overwrite'" style="display:flex; align-items:center; gap:8px; margin-top:10px">
             <input type="checkbox" v-model="confirmOverwrite" style="width:auto; margin:0">
             我知道覆盖导入会清空当前全部数据
           </label>
         </template>
       </div>
-    </div>
+    </section>
 
-    <div class="card">
-      <h3>关于</h3>
-      <p class="hint">
-        Keyfolio · 本地优先的 API Key 资产管理器<br>
-        数据库与日志位于 data/ 目录，迁移时整目录复制即可。
-      </p>
-    </div>
+    <section class="sheet">
+      <header class="sheet-head">
+        <div><h2>关于</h2></div>
+      </header>
+      <div class="sheet-body">
+        <p class="hint" style="margin:0">
+          Keyfolio · 本地优先的 API Key 资产管理器<br>
+          数据库与日志位于 data/ 目录，迁移时整目录复制即可。
+        </p>
+      </div>
+    </section>
   </div>`,
   data: () => ({
     s: {}, pw: { old: "", new1: "", new2: "" },

@@ -1,72 +1,109 @@
 /** 统一看板：汇总统计 + 筛选排序 + 余额趋势图（Chart.js）。 */
-import { api, expiryInfo, fmtBalance, fmtTime } from "../api.js";
+import { api, expiryInfo, fmtTime } from "../api.js";
 
 export const DashboardView = {
   template: `
   <div>
-    <div class="stat-grid">
-      <div class="stat"><div class="v">{{ summary.channels_total ?? "—" }}</div><div class="l">渠道数</div></div>
-      <div class="stat"><div class="v">{{ summary.keys_active ?? "—" }}<span class="hint" style="font-size:12px"> / {{ summary.keys_total }}</span></div><div class="l">启用 Key</div></div>
-      <div class="stat"><div class="v dim">{{ balanceText }}</div><div class="l">总余额（按币种）</div></div>
-      <div class="stat"><div class="v dim" style="font-size:13px">{{ fmtTime(summary.latest_update) }}</div><div class="l">最近余额更新</div></div>
-    </div>
-
-    <div class="card">
-      <div class="inline-form" style="margin-bottom:4px">
-        <label class="field">分组
-          <select v-model="fGroup"><option value="">全部分组</option><option v-for="g in groups" :key="g">{{ g }}</option></select>
-        </label>
-        <label class="field">类型
-          <select v-model="fType"><option value="">全部类型</option><option v-for="t in channelTypes" :key="t.id" :value="t.id">{{ t.label }}</option></select>
-        </label>
-        <label class="field">排序
-          <select v-model="sortBy">
-            <option value="balance_desc">余额从高到低</option>
-            <option value="balance_asc">余额从低到高</option>
-            <option value="updated">按更新时间</option>
-            <option value="channel">按渠道</option>
-          </select>
-        </label>
+    <section class="folio">
+      <div class="folio-main">
+        <div class="folio-label">总余额（按币种）</div>
+        <div class="folio-amounts" v-if="balanceEntries.length">
+          <div class="amount" v-for="b in balanceEntries" :key="b.cur">
+            <span class="cur">{{ b.cur }}</span><span class="val">{{ b.value }}</span>
+          </div>
+        </div>
+        <div class="folio-amounts" v-else><span class="none">—</span></div>
       </div>
-      <table class="list" v-if="rows.length">
-        <thead><tr><th>渠道 / Key</th><th>余额</th><th>状态</th><th class="m-hide">更新时间</th></tr></thead>
+      <dl class="folio-meta">
+        <div>
+          <dt>渠道</dt>
+          <dd>{{ summary.channels_total ?? "—" }}</dd>
+        </div>
+        <div>
+          <dt>启用 Key</dt>
+          <dd>{{ summary.keys_active ?? "—" }}<small> / {{ summary.keys_total ?? "—" }}</small></dd>
+        </div>
+        <div>
+          <dt>最近余额更新</dt>
+          <dd class="dd-time">{{ fmtTime(summary.latest_update) }}</dd>
+        </div>
+      </dl>
+    </section>
+
+    <section class="sheet">
+      <header class="sheet-head">
+        <div>
+          <h2>Key 明细</h2>
+          <p>{{ rows.length ? rows.length + " 个 Key" : "按渠道汇总" }}</p>
+        </div>
+        <div class="filters">
+          <label class="field">分组
+            <select v-model="fGroup"><option value="">全部分组</option><option v-for="g in groups" :key="g">{{ g }}</option></select>
+          </label>
+          <label class="field">类型
+            <select v-model="fType"><option value="">全部类型</option><option v-for="t in channelTypes" :key="t.id" :value="t.id">{{ t.label }}</option></select>
+          </label>
+          <label class="field">排序
+            <select v-model="sortBy">
+              <option value="balance_desc">余额从高到低</option>
+              <option value="balance_asc">余额从低到高</option>
+              <option value="updated">按更新时间</option>
+              <option value="channel">按渠道</option>
+            </select>
+          </label>
+        </div>
+      </header>
+
+      <table class="ledger" v-if="rows.length">
+        <thead>
+          <tr><th>渠道 / Key</th><th class="num">余额</th><th>状态</th><th class="m-hide">更新时间</th><th></th></tr>
+        </thead>
         <tbody>
-          <tr v-for="r in rows" :key="r.key.id" style="cursor:pointer" @click="openTrend(r.key)">
+          <tr v-for="r in rows" :key="r.key.id" tabindex="0" @click="openTrend(r.key)"
+              @keydown.enter="openTrend(r.key)" @keydown.space.prevent="openTrend(r.key)">
             <td>
-              <b>{{ r.channel.name }}</b> <span class="badge">{{ r.key.name }}</span>
-              <div class="hint">{{ r.channel.grp || "" }}</div>
+              <div class="row-name">{{ r.channel.name }}</div>
+              <div class="row-sub"><span class="tag">{{ r.key.name }}</span>{{ r.channel.grp || "未分组" }}</div>
             </td>
-            <td class="mono"><b>{{ fmtBalance(r.key) }}</b>
-              <div class="hint" v-if="expiryOf(r.key)">
+            <td class="num">
+              <div class="row-balance">{{ fmtAmount(r.key.balance) }}<small v-if="r.key.currency">{{ r.key.currency }}</small></div>
+              <div class="row-sub" v-if="expiryOf(r.key)">
                 <span class="badge" :class="expiryOf(r.key).cls">{{ expiryOf(r.key).text }}</span>
               </div>
             </td>
-            <td>
-              <span class="badge" :class="badgeClass(r.key)">{{ badgeText(r.key) }}</span>
-            </td>
-            <td class="hint m-hide">{{ fmtTime(r.key.balance_updated_at) }}</td>
+            <td><span class="badge dot" :class="badgeClass(r.key)">{{ badgeText(r.key) }}</span></td>
+            <td class="row-sub m-hide">{{ fmtTime(r.key.balance_updated_at) }}</td>
+            <td class="row-arrow"><k-icon name="chart"></k-icon></td>
           </tr>
         </tbody>
       </table>
-      <div class="hint" v-else style="padding:24px; text-align:center">还没有数据，先到「渠道」页添加</div>
-    </div>
+
+      <div class="empty" v-else>
+        <k-icon name="key"></k-icon>
+        <h3>还没有 Key</h3>
+        <p>先在渠道里添加第一个 API Key，余额会汇总到这里。</p>
+        <a class="btn primary" href="#/channels">去添加</a>
+      </div>
+    </section>
 
     <div class="modal-mask" v-if="trend" @click.self="closeTrend">
       <div class="modal">
-        <h3>{{ trend.key.name }} · 余额趋势 <span class="badge">{{ trend.key.currency }}</span></h3>
-        <p class="hint">当前 {{ trend.key.balance }} {{ trend.key.currency }} · 共 {{ trend.records.length }} 条记录</p>
-        <label class="field" style="max-width:180px">范围
-          <select v-model.number="trendDays" @change="loadTrend">
+        <div class="modal-head">
+          <h3>{{ trend.key.name }} · 余额趋势</h3>
+          <button class="icon-btn" @click="closeTrend" aria-label="关闭"><k-icon name="x"></k-icon></button>
+        </div>
+        <div class="trend-bar">
+          <p class="hint">当前 {{ fmtAmount(trend.key.balance) }} {{ trend.key.currency }} · 共 {{ trend.records.length }} 条记录</p>
+          <select class="trend-range" v-model.number="trendDays" @change="loadTrend" aria-label="时间范围">
             <option :value="7">最近 7 天</option>
             <option :value="30">最近 30 天</option>
             <option :value="90">最近 90 天</option>
             <option :value="365">最近一年</option>
           </select>
-        </label>
-        <canvas id="trend-chart" height="220"></canvas>
-        <div class="hint" v-if="!trend.records.length" style="text-align:center; padding:10px">该 Key 还没有余额记录</div>
-        <div class="btn-row" style="margin-top:12px">
-          <button class="btn" style="flex:1" @click="closeTrend">关闭</button>
+        </div>
+        <div class="chart-wrap" v-if="trend.records.length"><canvas id="trend-chart"></canvas></div>
+        <div class="empty" v-else style="padding:28px 10px">
+          <p style="margin:0">该 Key 还没有余额记录</p>
         </div>
       </div>
     </div>
@@ -80,10 +117,9 @@ export const DashboardView = {
     groups() {
       return [...new Set(this.channels.map(c => c.grp).filter(Boolean))];
     },
-    balanceText() {
+    balanceEntries() {
       const b = this.summary.balance_by_currency || {};
-      const parts = Object.entries(b).map(([cur, v]) => `${v} ${cur}`);
-      return parts.length ? parts.join(" + ") : "—";
+      return Object.entries(b).map(([cur, v]) => ({ cur, value: this.fmtAmount(v) }));
     },
     rows() {
       let out = [];
@@ -102,7 +138,13 @@ export const DashboardView = {
   },
   async created() { await this.load(); },
   methods: {
-    fmtBalance, fmtTime,
+    fmtTime,
+    fmtAmount(v) {
+      if (v === null || v === undefined || v === "") return "—";
+      const n = Number(v);
+      if (Number.isNaN(n)) return String(v);
+      return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    },
     expiryOf(k) { return expiryInfo(k.expires_at); },
     badgeClass(k) {
       if (!k.enabled) return "warn";
@@ -146,17 +188,32 @@ export const DashboardView = {
           labels,
           datasets: [{
             label: `${this.trend.key.name} 余额（${this.trend.key.currency}）`,
-            data, tension: 0.3, fill: true,
-            borderColor: "#38bdf8", backgroundColor: "rgba(56,189,248,.12)",
-            pointRadius: 3,
+            data, tension: 0.32, fill: true,
+            borderColor: "#c7a15b", backgroundColor: "rgba(199,161,91,.10)",
+            pointRadius: 2.5, pointHoverRadius: 4, pointBackgroundColor: "#0b110d",
+            pointBorderColor: "#c7a15b", borderWidth: 2,
           }],
         },
         options: {
-          responsive: true,
-          plugins: { legend: { labels: { color: "#8ea0bf" } } },
+          responsive: true, maintainAspectRatio: false,
+          interaction: { mode: "index", intersect: false },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: "#111a14", borderColor: "#28352b", borderWidth: 1,
+              titleColor: "#eae4d5", bodyColor: "#9ba79c", padding: 10, displayColors: false,
+              callbacks: { label: (c) => `${this.fmtAmount(c.parsed.y)} ${this.trend.key.currency}` },
+            },
+          },
           scales: {
-            x: { ticks: { color: "#8ea0bf", maxTicksLimit: 8, font: { size: 10 } } },
-            y: { ticks: { color: "#8ea0bf" } },
+            x: {
+              grid: { color: "rgba(234,228,213,.05)" }, border: { color: "#1d2921" },
+              ticks: { color: "#7c8a7f", maxTicksLimit: 7, font: { size: 10 } },
+            },
+            y: {
+              grid: { color: "rgba(234,228,213,.05)" }, border: { display: false },
+              ticks: { color: "#7c8a7f", font: { size: 10 }, callback: (v) => this.fmtAmount(v) },
+            },
           },
         },
       });

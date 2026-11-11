@@ -51,7 +51,11 @@ export function fmtTime(ts) {
 
 export function fmtBalance(k) {
   if (k.balance === null || k.balance === undefined) return "—";
-  return `${k.balance} ${k.currency || ""}`;
+  const n = Number(k.balance);
+  const v = Number.isNaN(n)
+    ? String(k.balance)
+    : n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `${v} ${k.currency || ""}`;
 }
 
 export function expiryInfo(value) {

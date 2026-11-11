@@ -5,30 +5,36 @@ export const SetupView = {
   emits: ["done"],
   template: `
   <div class="auth-wrap">
-    <div class="auth-card">
-      <span class="brand">🔐 Keyfolio</span>
-      <div class="sub" v-if="stage==='form'">首次使用，设置主密码。主密码用于加密所有 Key，<b>丢失无法找回</b>。</div>
-      <div class="card">
+    <div class="auth-shell">
+      <k-icon name="seal" class="auth-seal"></k-icon>
+      <div class="auth-brand">Keyfolio</div>
+      <p class="auth-tag">本地 API 资产账本</p>
+
+      <div class="auth-card">
         <template v-if="stage==='form'">
+          <h3>设置主密码</h3>
+          <p class="hint">主密码用于加密所有 Key，丢失无法找回。</p>
           <label class="field">主密码
             <input type="password" v-model="password" @keyup.enter="submit" placeholder="至少 8 位">
           </label>
           <label class="field">确认密码
             <input type="password" v-model="confirm" @keyup.enter="submit">
           </label>
-          <div v-if="error" class="toast err" style="margin-bottom:10px">{{ error }}</div>
-          <button class="btn primary" style="width:100%" :disabled="busy || password.length < 8" @click="submit">
+          <div v-if="error" class="form-error">{{ error }}</div>
+          <button class="btn primary block" :disabled="busy || password.length < 8" @click="submit">
             {{ busy ? "生成加密密钥中…" : "设置主密码" }}
           </button>
         </template>
         <template v-else>
-          <h3>恢复码（只显示这一次）</h3>
-          <p class="hint">用于忘记主密码时重置。请立即保存到安全的地方（密码管理器 / 纸条）。</p>
+          <h3>恢复码</h3>
+          <p class="hint">用于忘记主密码时重置。只显示这一次，请立即保存。</p>
           <div class="recovery-box">{{ recovery }}</div>
-          <button class="btn" style="width:100%; margin-bottom:8px" @click="copyRecovery">复制恢复码</button>
-          <button class="btn primary" style="width:100%" @click="$emit('done')">我已保存，进入系统</button>
+          <button class="btn block" @click="copyRecovery"><k-icon name="copy"></k-icon>复制恢复码</button>
+          <button class="btn primary block" style="margin-top:8px" @click="$emit('done')">我已保存，进入系统</button>
         </template>
       </div>
+
+      <p class="auth-foot">数据只保存在这台机器 · Key 字段级加密</p>
     </div>
   </div>`,
   data: () => ({ password: "", confirm: "", recovery: "", stage: "form", busy: false, error: "" }),
@@ -56,44 +62,54 @@ export const LoginView = {
   emits: ["logged-in"],
   template: `
   <div class="auth-wrap">
-    <div class="auth-card">
-      <span class="brand">🔐 Keyfolio</span>
-      <div class="sub">本地 API 资产管理器</div>
-      <div class="card" v-if="!showRecovery">
+    <div class="auth-shell">
+      <k-icon name="seal" class="auth-seal"></k-icon>
+      <div class="auth-brand">Keyfolio</div>
+      <p class="auth-tag">本地 API 资产账本</p>
+
+      <div class="auth-card" v-if="!showRecovery && !newRecovery">
+        <h3>解锁账本</h3>
+        <p class="hint">输入主密码继续。</p>
         <label class="field">主密码
           <input type="password" v-model="password" @keyup.enter="submit" autofocus>
         </label>
         <label class="field" v-if="totpEnabled">两步验证码 / 备用码
           <input v-model="totp" @keyup.enter="submit" inputmode="numeric" autocomplete="one-time-code">
         </label>
-        <div v-if="error" class="toast err" style="margin-bottom:10px">{{ error }}</div>
-        <button class="btn primary" style="width:100%" :disabled="busy || !password" @click="submit">
+        <div v-if="error" class="form-error">{{ error }}</div>
+        <button class="btn primary block" :disabled="busy || !password" @click="submit">
           {{ busy ? "解锁中…" : "解锁" }}
         </button>
-        <div style="text-align:center; margin-top:10px">
-          <a href="#" style="color:var(--muted); font-size:12.5px" @click.prevent="showRecovery = true">忘记主密码？用恢复码重置</a>
+        <div style="text-align:center">
+          <a href="#" class="auth-link" @click.prevent="showRecovery = true">忘记主密码？用恢复码重置</a>
         </div>
       </div>
-      <div class="card" v-else>
-        <h3>凭恢复码重置密码</h3>
+
+      <div class="auth-card" v-else-if="showRecovery">
+        <h3>用恢复码重置密码</h3>
+        <p class="hint">重置后会用新密码重新包裹加密密钥。</p>
         <label class="field">恢复码
           <input v-model="recCode" placeholder="xxxx-xxxx-xxxx-xxxx">
         </label>
         <label class="field">新主密码
           <input type="password" v-model="recNew">
         </label>
-        <div v-if="error" class="toast err" style="margin-bottom:10px">{{ error }}</div>
-        <button class="btn primary" style="width:100%" :disabled="busy || !recCode || !recNew" @click="doRecovery">重置并登录</button>
-        <div style="text-align:center; margin-top:10px">
-          <a href="#" style="color:var(--muted); font-size:12.5px" @click.prevent="showRecovery = false">返回登录</a>
+        <div v-if="error" class="form-error">{{ error }}</div>
+        <button class="btn primary block" :disabled="busy || !recCode || !recNew" @click="doRecovery">重置并登录</button>
+        <div style="text-align:center">
+          <a href="#" class="auth-link" @click.prevent="showRecovery = false">返回登录</a>
         </div>
       </div>
-      <div class="card" v-if="newRecovery">
-        <h3>新恢复码（只显示这一次）</h3>
+
+      <div class="auth-card" v-if="newRecovery">
+        <h3>新恢复码</h3>
+        <p class="hint">只显示这一次，请立即保存到安全的地方。</p>
         <div class="recovery-box">{{ newRecovery }}</div>
-        <button class="btn" style="width:100%; margin-bottom:8px" @click="copyNewRecovery">复制新恢复码</button>
-        <button class="btn ok" style="width:100%" @click="finishRecovery">我已保存</button>
+        <button class="btn block" @click="copyNewRecovery"><k-icon name="copy"></k-icon>复制新恢复码</button>
+        <button class="btn ok block" style="margin-top:8px" @click="finishRecovery">我已保存</button>
       </div>
+
+      <p class="auth-foot">数据只保存在这台机器 · Key 字段级加密</p>
     </div>
   </div>`,
   data: () => ({
