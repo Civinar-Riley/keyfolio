@@ -17,6 +17,7 @@ from . import crypto, db
 SESSION_COOKIE = "kf_session"
 LOCK_THRESHOLD = 5
 LOCK_SECONDS = 300
+SESSION_TTL = 7 * 24 * 3600  # 闲置 7 天后会话失效
 
 K_PW_HASH = "auth_pw_hash"
 K_PW_KDF = "auth_pw_kdf"
@@ -34,6 +35,7 @@ K_LOCK_UNTIL = "lock_until"
 class State:
     data_key: bytes | None = None
     sessions: dict[str, float] = {}
+    locked: set[str] = set()  # 已锁屏的会话；data key 仍驻留内存
 
 
 def _http(status: int, message: str) -> HTTPException:
@@ -57,12 +59,26 @@ def _locked_error() -> HTTPException:
     return _http(423, f"失败次数过多，已锁定到 {until}")
 
 
-def status() -> dict[str, Any]:
+def _prune_sessions() -> None:
+    cutoff = time.time() - SESSION_TTL
+    expired = [token for token, seen in State.sessions.items() if seen < cutoff]
+    for token in expired:
+        State.sessions.pop(token, None)
+        State.locked.discard(token)
+    if not State.sessions:
+        State.data_key = None
+
+
+def status(request: Request | None = None) -> dict[str, Any]:
+    _prune_sessions()
+    token = _token_of(request) if request is not None else None
     return {
         "configured": is_configured(),
         "locked": is_locked(),
         "lock_until": lock_until(),
         "totp_enabled": bool(db.get_setting(K_TOTP_ENABLED, False)),
+        "authenticated": bool(token and token in State.sessions),
+        "screen_locked": bool(token and token in State.locked),
     }
 
 
@@ -90,6 +106,7 @@ def _clear_fail() -> None:
 def create_session() -> str:
     token = secrets.token_urlsafe(32)
     State.sessions[token] = time.time()
+    _prune_sessions()
     return token
 
 
@@ -100,32 +117,51 @@ def _token_of(request: Request) -> str | None:
 def _drop_session(token: str | None) -> None:
     if token:
         State.sessions.pop(token, None)
+        State.locked.discard(token)
 
 
 def drop_all_sessions() -> None:
     State.sessions.clear()
+    State.locked.clear()
     State.data_key = None
 
 
 def require_session(request: Request) -> str:
+    _prune_sessions()
     token = _token_of(request)
     if token is None or token not in State.sessions:
         raise _http(401, "未登录或会话已失效")
+    State.sessions[token] = time.time()
     return token
 
 
 def _require_token(token: str) -> str:
     """内部函数持有的 token 形态校验。"""
+    _prune_sessions()
     if not token or token not in State.sessions:
         raise _http(401, "未登录或会话已失效")
     return token
 
 
+def _require_unlocked(token: str) -> str:
+    _require_token(token)
+    if token in State.locked:
+        raise _http(423, "已锁定，请先解锁")
+    return token
+
+
 def require_data_key(request: Request) -> bytes:
-    require_session(request)
+    token = require_session(request)
+    if token in State.locked:
+        raise _http(423, "已锁定，请先解锁")
     if State.data_key is None:
         raise _http(401, "需要重新登录")
     return State.data_key
+
+
+def lock_session(token: str) -> None:
+    _require_token(token)
+    State.locked.add(token)
 
 
 def setup(password: str) -> dict[str, str]:
@@ -202,7 +238,7 @@ def _check_second_factor(data_key: bytes, code: str) -> bool:
 
 
 def unlock(request: Request, password: str) -> None:
-    require_session(request)
+    token = require_session(request)
     if is_locked():
         raise _locked_error()
     if not _verify_password(password):
@@ -211,15 +247,17 @@ def unlock(request: Request, password: str) -> None:
             raise _locked_error()
         raise _http(401, "主密码错误")
     _clear_fail()
+    State.locked.discard(token)
 
 
 def logout(token: str) -> None:
     _drop_session(token)
-    State.data_key = None
+    if not State.sessions:
+        State.data_key = None
 
 
 def change_password(token: str, old: str, new: str) -> None:
-    _require_token(token)
+    _require_unlocked(token)
     if not _verify_password(old):
         raise _http(401, "原密码错误")
     if len(new) < 8:
@@ -230,6 +268,10 @@ def change_password(token: str, old: str, new: str) -> None:
     kdf = crypto.make_kdf_params()
     db.set_setting(K_PW_KDF, kdf)
     db.set_setting(K_PW_HASH, crypto.hash_password(new, kdf))
+    # 改密码后其他设备的会话一并失效，只保留当前会话
+    for other in list(State.sessions):
+        if other != token:
+            _drop_session(other)
 
 
 def recovery_reset(recovery_code: str, new_password: str) -> str:
@@ -267,7 +309,7 @@ def recovery_reset(recovery_code: str, new_password: str) -> str:
 
 
 def totp_setup(token: str) -> dict[str, str]:
-    _require_token(token)
+    _require_unlocked(token)
     if db.get_setting(K_TOTP_ENABLED):
         raise _http(409, "TOTP 已开启")
     secret = pyotp.random_base32()
@@ -284,7 +326,7 @@ def qr_svg(text: str) -> str:
 
 
 def totp_enable(token: str, code: str) -> dict[str, list[str]]:
-    _require_token(token)
+    _require_unlocked(token)
     if State.data_key is None:
         raise _http(401, "需要重新登录")
     pending = db.get_setting(K_TOTP_PENDING)
@@ -300,7 +342,7 @@ def totp_enable(token: str, code: str) -> dict[str, list[str]]:
 
 
 def totp_disable(token: str, password: str) -> None:
-    _require_token(token)
+    _require_unlocked(token)
     if not _verify_password(password):
         raise _http(401, "主密码错误")
     db.delete_setting(K_TOTP_SECRET)
@@ -309,7 +351,7 @@ def totp_disable(token: str, password: str) -> None:
 
 
 def backup_codes_regenerate(token: str, password: str) -> list[str]:
-    _require_token(token)
+    _require_unlocked(token)
     if not _verify_password(password):
         raise _http(401, "主密码错误")
     return _gen_backup_codes()

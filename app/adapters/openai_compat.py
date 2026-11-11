@@ -3,7 +3,7 @@
 Base URL 允许带或不带 /v1 后缀（用户从控制台复制的地址经常带），
 拼接时保证版本段只出现一次。
 """
-from .base import get_json, normalize_base, post_json
+from .base import AdapterError, get_json, normalize_base, post_json
 
 
 def _api_url(base_url: str, suffix: str) -> str:
@@ -28,10 +28,19 @@ async def fetch_models(base_url: str, key: str) -> list[str]:
 
 
 async def chat_test(base_url: str, key: str, model: str) -> str:
+    url = _api_url(base_url, "/chat/completions")
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": "ping"}],
         "max_tokens": 1,
     }
-    await post_json(_api_url(base_url, "/chat/completions"), payload, key)
+    try:
+        await post_json(url, payload, key)
+    except AdapterError as exc:
+        # 新推理模型不再接受 max_tokens，改用 max_completion_tokens 再试一次
+        if exc.status != 400:
+            raise
+        payload.pop("max_tokens", None)
+        payload["max_completion_tokens"] = 1
+        await post_json(url, payload, key)
     return f"对话请求成功（model={model}）"

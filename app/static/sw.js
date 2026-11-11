@@ -1,5 +1,5 @@
 /* Keyfolio Service Worker：静态资源 cache-first，API 永远走网络。 */
-const CACHE = "keyfolio-v1";
+const CACHE = "keyfolio-v2";
 const PRECACHE = [
   "/",
   "/css/app.css",

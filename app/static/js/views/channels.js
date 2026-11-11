@@ -1,5 +1,5 @@
 /** 渠道与 Key 管理：列表 + 详情 + 模型同步 + 余额操作。 */
-import { api, fmtBalance, fmtTime } from "../api.js";
+import { api, copyText, expiryInfo, fmtBalance, fmtTime } from "../api.js";
 
 const emptyChannel = { name: "", type: "gateway", base_url: "", console_url: "", grp: "", notes: "" };
 
@@ -23,7 +23,7 @@ export const ChannelsView = {
             <span class="badge" :class="c.enabled ? 'ok' : 'warn'">{{ c.enabled ? "启用" : "停用" }}</span>
           </div>
           <div class="meta">{{ c.base_url }}</div>
-          <div class="meta">{{ c.keys.length }} 个 Key · {{ c.models_count }} 个模型</div>
+          <div class="meta">{{ c.keys.length }} 个 Key · {{ c.models_enabled || 0 }}/{{ c.models_count }} 个模型</div>
         </div>
         <div class="hint" v-if="!filtered.length" style="text-align:center; padding:30px 0">
           还没有渠道，点上面"＋ 新渠道"开始
@@ -55,6 +55,7 @@ export const ChannelsView = {
             <div class="grow">
               <div class="key-name">{{ k.name }}
                 <span class="badge" v-if="!k.enabled">停用</span>
+                <span class="badge" :class="expiryOf(k).cls" v-if="expiryOf(k)">{{ expiryOf(k).text }}</span>
                 <span class="badge" :class="k.last_check==='ok' ? 'ok' : (k.last_check==='fail' ? 'fail' : '')"
                       v-if="k.last_check" :title="k.last_check_msg">
                   {{ k.last_check==='ok' ? "✓ 可用" : "✗ 异常" }}
@@ -89,17 +90,20 @@ export const ChannelsView = {
         </div>
 
         <div class="card">
-          <h3>模型（{{ models.length }}）
+          <h3>模型（{{ enabledModelCount }} / {{ models.length }} 启用）
             <span class="btn-row" style="float:right">
               <button class="btn sm primary" @click="fetchModels()">拉取模型</button>
               <button class="btn sm" @click="pasteOpen=true">粘贴 JSON</button>
               <button class="btn sm" @click="modelFormOpen=true">手动添加</button>
             </span>
           </h3>
-          <table class="list" v-if="models.length">
+          <label class="field" v-if="models.length" style="max-width:280px; margin:0 0 8px">
+            <input v-model="modelQuery" placeholder="筛选模型 ID">
+          </label>
+          <table class="list" v-if="filteredModels.length">
             <thead><tr><th>模型 ID</th><th>类型</th><th>状态</th><th></th></tr></thead>
             <tbody>
-              <tr v-for="m in models" :key="m.id">
+              <tr v-for="m in filteredModels" :key="m.id">
                 <td class="mono">{{ m.model_id }}</td>
                 <td>
                   <select :value="m.mtype" @change="updateModel(m, {mtype: $event.target.value})">
@@ -114,6 +118,7 @@ export const ChannelsView = {
               </tr>
             </tbody>
           </table>
+          <div class="hint" v-else-if="models.length">没有匹配的模型。</div>
           <div class="hint" v-else>还没有模型。用"拉取模型"从平台同步，或手动添加。</div>
         </div>
       </div>
@@ -126,6 +131,12 @@ export const ChannelsView = {
     <div class="modal-mask" v-if="chanForm" @click.self="chanForm=null">
       <div class="modal">
         <h3>{{ chanForm.id ? "编辑渠道" : "新渠道" }}</h3>
+        <label class="field" v-if="providers.length">预设（可选）
+          <select v-model="preset" @change="applyPreset">
+            <option value="">自定义</option>
+            <option v-for="p in providers" :key="p.type + '|' + p.base_url" :value="p.type + '|' + p.base_url">{{ p.name }}</option>
+          </select>
+        </label>
         <label class="field">名称 <input v-model="chanForm.name" placeholder="如 DeepSeek 官方"></label>
         <label class="field">类型
           <select v-model="chanForm.type">
@@ -152,6 +163,7 @@ export const ChannelsView = {
         <h3>{{ keyForm.id ? "编辑 Key" : "添加 Key" }}</h3>
         <label class="field">名称 <input v-model="keyForm.name" placeholder="如 主 Key"></label>
         <label class="field">Key 值 <textarea v-model="keyForm.value" :placeholder="keyForm.id ? '留空则不修改' : 'sk-...'" style="min-height:70px"></textarea></label>
+        <label class="field">到期日（可选） <input v-model="keyForm.expires_at" placeholder="如 2026-12-31"></label>
         <label class="field">备注 <input v-model="keyForm.notes"></label>
         <label class="field" style="display:flex; align-items:center; gap:8px">
           <input type="checkbox" v-model="keyForm.enabled" style="width:auto; margin:0"> 启用
@@ -215,6 +227,14 @@ export const ChannelsView = {
             </li>
           </ul>
         </template>
+        <template v-if="diff.revived && diff.revived.length">
+          <h3 class="diff-add">重新出现（{{ diff.revived.length }}）</h3>
+          <ul class="diff-list">
+            <li v-for="m in diff.revived" :key="'r'+m">
+              <input type="checkbox" v-model="revivedChecked" :value="m" style="width:auto"> {{ m }}
+            </li>
+          </ul>
+        </template>
         <template v-if="diff.removed.length">
           <h3 class="diff-del">远端已消失（{{ diff.removed.length }}）</h3>
           <label class="field">处理方式
@@ -224,9 +244,9 @@ export const ChannelsView = {
             </select>
           </label>
         </template>
-        <p class="hint" v-if="!diff.added.length && !diff.removed.length">没有差异，本地已是最新。</p>
+        <p class="hint" v-if="!diff.added.length && !diff.removed.length && !(diff.revived && diff.revived.length)">没有差异，本地已是最新。</p>
         <div class="btn-row">
-          <button class="btn primary" style="flex:1" :disabled="!diff.added.length && !diff.removed.length"
+          <button class="btn primary" style="flex:1" :disabled="!diff.added.length && !diff.removed.length && !revivedChecked.length"
                   @click="applySync">应用同步</button>
           <button class="btn" @click="diff=null">取消</button>
         </div>
@@ -234,16 +254,16 @@ export const ChannelsView = {
     </div>
   </div>`,
   data: () => ({
-    channels: [], channelTypes: [], modelTypes: [],
+    channels: [], channelTypes: [], providers: [], modelTypes: [],
     filter: "", selectedId: null, detail: null, models: [],
     revealed: {},
     isMobile: window.matchMedia("(max-width: 767px)").matches,
     detailOpen: false,
-    chanForm: null, keyForm: null,
+    chanForm: null, preset: "", keyForm: null,
     balForm: null, balKeyName: "",
     pasteOpen: false, pasteText: "", pasteIds: [],
-    modelFormOpen: false, newModelId: "",
-    diff: null, diffChecked: [], removedAction: "disable",
+    modelFormOpen: false, newModelId: "", modelQuery: "",
+    diff: null, diffChecked: [], revivedChecked: [], removedAction: "disable",
   }),
   computed: {
     filtered() {
@@ -252,6 +272,12 @@ export const ChannelsView = {
       return this.channels.filter(c =>
         [c.name, c.base_url, c.grp, c.notes].some(s => (s || "").toLowerCase().includes(q)));
     },
+    filteredModels() {
+      const q = this.modelQuery.trim().toLowerCase();
+      if (!q) return this.models;
+      return this.models.filter(m => (m.model_id || "").toLowerCase().includes(q));
+    },
+    enabledModelCount() { return this.models.filter(m => m.enabled).length; },
     enabledModels() { return this.models.filter(m => m.enabled).map(m => m.model_id); },
   },
   async created() {
@@ -265,10 +291,12 @@ export const ChannelsView = {
       const t = this.channelTypes.find(t => t.id === id);
       return t ? t.label.split("（")[0] : id;
     },
+    expiryOf(k) { return expiryInfo(k.expires_at); },
     async load() {
       const r = await api.get("/api/channels");
       this.channels = r.channels;
       this.channelTypes = r.channel_types;
+      this.providers = r.providers || [];
       this.modelTypes = r.model_types;
       if (this.selectedId) {
         this.detail = this.channels.find(c => c.id === this.selectedId) || null;
@@ -279,6 +307,7 @@ export const ChannelsView = {
       this.selectedId = id;
       this.detailOpen = true;
       this.revealed = {};
+      this.modelQuery = "";
       await this.load();
     },
     async loadModels(cid) {
@@ -286,7 +315,17 @@ export const ChannelsView = {
       this.models = r.models;
     },
     openChannelForm(c) {
+      this.preset = "";
       this.chanForm = c ? { ...c, enabled: !!c.enabled } : { ...emptyChannel, enabled: true };
+    },
+    applyPreset() {
+      if (!this.chanForm || !this.preset) return;
+      const p = this.providers.find(x => `${x.type}|${x.base_url}` === this.preset);
+      if (!p) return;
+      this.chanForm.type = p.type;
+      this.chanForm.base_url = p.base_url;
+      this.chanForm.console_url = p.console_url;
+      if (!this.chanForm.id || !this.chanForm.name) this.chanForm.name = p.name;
     },
     async saveChannel() {
       const f = this.chanForm;
@@ -312,15 +351,15 @@ export const ChannelsView = {
     },
     openKeyForm(k) {
       this.keyForm = k
-        ? { id: k.id, name: k.name, value: "", notes: k.notes, enabled: !!k.enabled }
-        : { name: "Key " + (this.detail.keys.length + 1), value: "", notes: "", enabled: true };
+        ? { id: k.id, name: k.name, value: "", notes: k.notes, expires_at: k.expires_at || "", enabled: !!k.enabled }
+        : { name: "Key " + (this.detail.keys.length + 1), value: "", notes: "", expires_at: "", enabled: true };
     },
     async saveKey() {
       const f = this.keyForm;
       try {
         if (f.id) {
           await api.put(`/api/keys/${f.id}`, {
-            name: f.name, notes: f.notes, enabled: f.enabled,
+            name: f.name, notes: f.notes, expires_at: f.expires_at, enabled: f.enabled,
             ...(f.value ? { value: f.value } : {}),
           });
         } else {
@@ -354,7 +393,7 @@ export const ChannelsView = {
           `API Key: ${r.value}`,
           models ? `Models: ${models}` : "",
         ].filter(Boolean).join("\n");
-        await navigator.clipboard.writeText(text);
+        await copyText(text);
         this.$toast("配置已复制到剪贴板", "ok");
       } catch (e) { this.$toast(e.message, "err"); }
     },
@@ -365,13 +404,17 @@ export const ChannelsView = {
           this.$toast(mode === "chat" ? r.message : `Key 可用，远端 ${r.models.length} 个模型`, "ok");
           if (mode === "models") {
             const remote = r.models;
-            const local = new Set(this.models.filter(m => m.enabled).map(m => m.model_id));
+            const localAll = new Set(this.models.map(m => m.model_id));
             this.diff = {
               remote_count: remote.length,
-              added: remote.filter(id => !local.has(id)),
+              added: remote.filter(id => !localAll.has(id)),
               removed: this.models.filter(m => m.enabled && !remote.includes(m.model_id)).map(m => m.model_id),
+              revived: this.models
+                .filter(m => m.auto_disabled && !m.enabled && remote.includes(m.model_id))
+                .map(m => m.model_id),
             };
             this.diffChecked = [...this.diff.added];
+            this.revivedChecked = [...this.diff.revived];
             this.removedAction = "disable";
           }
         } else {
@@ -381,8 +424,20 @@ export const ChannelsView = {
       } catch (e) { this.$toast(e.message, "err"); }
     },
     async verifyAll() {
-      for (const k of this.detail.keys.filter(k => k.enabled)) {
-        await this.verifyKey(k.id, "models");
+      const keys = this.detail.keys.filter(k => k.enabled);
+      if (!keys.length) { this.$toast("没有启用的 Key", "err"); return; }
+      const failures = [];
+      for (const k of keys) {
+        try {
+          const r = await api.post(`/api/keys/${k.id}/verify`, { mode: "models", model: "" });
+          if (!r.ok) failures.push(`${k.name}：${r.error}`);
+        } catch (e) { failures.push(`${k.name}：${e.message}`); }
+      }
+      await this.load();
+      if (failures.length) {
+        this.$toast(`测 Key 完成：${keys.length - failures.length} 个可用，${failures.length} 个异常（${failures[0]}）`, "err");
+      } else {
+        this.$toast(`测 Key 完成：${keys.length} 个全部可用`, "ok");
       }
     },
     async chatTest(keyId) {
@@ -398,8 +453,20 @@ export const ChannelsView = {
       } catch (e) { this.$toast(e.message, "err"); }
     },
     async checkAllBalance() {
-      for (const k of this.detail.keys.filter(k => k.enabled)) {
-        await this.checkBalance(k.id);
+      const keys = this.detail.keys.filter(k => k.enabled);
+      if (!keys.length) { this.$toast("没有启用的 Key", "err"); return; }
+      const failures = [];
+      for (const k of keys) {
+        try {
+          const r = await api.post(`/api/keys/${k.id}/balance-check`);
+          if (!r.ok) failures.push(`${k.name}：${r.error}`);
+        } catch (e) { failures.push(`${k.name}：${e.message}`); }
+      }
+      await this.load();
+      if (failures.length) {
+        this.$toast(`查余额完成：${keys.length - failures.length} 个成功，${failures.length} 个失败（${failures[0]}）`, "err");
+      } else {
+        this.$toast(`查余额完成：${keys.length} 个全部成功`, "ok");
       }
     },
     openBalanceManual(k) {
@@ -429,6 +496,7 @@ export const ChannelsView = {
         if (!r.ok) { this.$toast(r.error, "err"); return; }
         this.diff = r;
         this.diffChecked = [...r.added];
+        this.revivedChecked = [...(r.revived || [])];
         this.removedAction = "disable";
       } catch (e) { this.$toast(e.message, "err"); }
     },
@@ -437,11 +505,12 @@ export const ChannelsView = {
         const r = await api.post(`/api/channels/${this.selectedId}/models/sync`, {
           added: this.diffChecked,
           removed: this.diff.removed,
+          revived: this.revivedChecked,
           removed_action: this.removedAction,
         });
         this.diff = null;
         await Promise.all([this.load(), this.loadModels(this.selectedId)]);
-        this.$toast(`同步完成：新增 ${r.added}，移除 ${r.removed}`, "ok");
+        this.$toast(`同步完成：新增 ${r.added}，恢复 ${r.revived || 0}，移除 ${r.removed}`, "ok");
       } catch (e) { this.$toast(e.message, "err"); }
     },
     async addManualModel() {

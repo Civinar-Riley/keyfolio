@@ -1,4 +1,6 @@
 """Google Gemini：模型列表 /v1beta/models + generateContent 测试（余额手动填）。"""
+from urllib.parse import urlencode
+
 from .base import get_json, normalize_base, post_json
 
 
@@ -14,15 +16,24 @@ def _beta_url(base_url: str, suffix: str) -> str:
 
 
 async def fetch_models(base_url: str, key: str) -> list[str]:
-    data = await get_json(_beta_url(base_url, "/models"), key, headers=_headers(key))
-    items = data.get("models") if isinstance(data, dict) else data
-    if not isinstance(items, list):
-        items = []
-    ids = []
-    for m in items:
-        if isinstance(m, dict) and m.get("name"):
-            name = str(m["name"])
-            ids.append(name.split("models/", 1)[-1])
+    url = _beta_url(base_url, "/models")
+    ids: list[str] = []
+    page_token = ""
+    for _ in range(20):
+        query = {"pageSize": 1000}
+        if page_token:
+            query["pageToken"] = page_token
+        data = await get_json(f"{url}?{urlencode(query)}", key, headers=_headers(key))
+        items = data.get("models") if isinstance(data, dict) else data
+        if not isinstance(items, list):
+            break
+        for m in items:
+            if isinstance(m, dict) and m.get("name"):
+                ids.append(str(m["name"]).split("models/", 1)[-1])
+        next_token = data.get("nextPageToken") if isinstance(data, dict) else ""
+        if not next_token or next_token == page_token:
+            break
+        page_token = next_token
     return sorted(set(ids))
 
 

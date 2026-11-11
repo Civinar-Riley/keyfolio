@@ -1,5 +1,5 @@
 /** 设置：改密码 / TOTP / 定时任务 / 备份导入导出 / 锁屏登出。 */
-import { api } from "../api.js";
+import { api, copyText } from "../api.js";
 
 export const SettingsView = {
   emits: ["lock", "logout"],
@@ -19,7 +19,7 @@ export const SettingsView = {
       <label class="field">新密码（至少 8 位） <input type="password" v-model="pw.new1"></label>
       <label class="field">确认新密码 <input type="password" v-model="pw.new2"></label>
       <button class="btn primary" :disabled="busy || !pw.old || pw.new1.length < 8 || pw.new1 !== pw.new2" @click="changePassword">修改</button>
-      <p class="hint" style="margin-top:8px">改密码只重新包裹加密密钥，Key 数据无需重新加密。恢复码不变。</p>
+      <p class="hint" style="margin-top:8px">改密码只重新包裹加密密钥，Key 数据无需重新加密。恢复码不变；其他设备上的会话会退出。</p>
     </div>
 
     <div class="card">
@@ -52,6 +52,7 @@ export const SettingsView = {
       <div v-if="backupCodes.length">
         <h3 style="margin-top:12px">备用码（只显示这一次）</h3>
         <div class="codes-grid"><code v-for="c in backupCodes" :key="c">{{ c }}</code></div>
+        <button class="btn sm" @click="copyCodes">复制全部备用码</button>
       </div>
     </div>
 
@@ -181,8 +182,11 @@ export const SettingsView = {
     async _export(password) {
       try {
         const r = await api.post("/api/backup/export", { password });
-        const name = password ? "keyfolio-backup-encrypted.json" : "keyfolio-backup.json";
-        const blob = new Blob([JSON.stringify(r)], { type: "application/json" });
+        const stamp = new Date().toISOString().slice(0, 10);
+        const name = password
+          ? `keyfolio-backup-encrypted-${stamp}.json`
+          : `keyfolio-backup-${stamp}.json`;
+        const blob = new Blob([JSON.stringify(r, null, 2)], { type: "application/json" });
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
         a.download = name;
@@ -191,6 +195,12 @@ export const SettingsView = {
         if (!password) this.$toast("已导出明文备份，内含 Key 明文，注意保管", "ok");
         else this.$toast("已导出加密备份", "ok");
         this.encOpen = false; this.encPw = "";
+      } catch (e) { this.$toast(e.message, "err"); }
+    },
+    async copyCodes() {
+      try {
+        await copyText(this.backupCodes.join("\n"));
+        this.$toast("备用码已复制", "ok");
       } catch (e) { this.$toast(e.message, "err"); }
     },
     async pickFile(ev) {

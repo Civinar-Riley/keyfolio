@@ -68,12 +68,22 @@ async def run_all_balances() -> None:
 
 
 async def run_all_model_sync() -> None:
-    for channel, key in _iter_enabled_pairs():
+    with db.get_conn() as conn:
+        channels = conn.execute("SELECT * FROM channels WHERE enabled=1").fetchall()
+    for channel in channels:
+        key = services.first_enabled_key(channel["id"])
+        if key is None:
+            continue
         try:
             ids = await services.pull_models_async(channel, key)
             diff = services.diff_models(channel["id"], ids)
-            if diff["added"]:
-                services.apply_sync(channel["id"], diff["added"], [], "disable")
-                log.info("自动同步渠道 %s：新增 %d 个模型", channel["id"], len(diff["added"]))
+            added = diff["added"]
+            revived = diff["revived"]
+            if added or revived:
+                services.apply_sync(channel["id"], added, [], "disable", revived)
+                log.info(
+                    "自动同步渠道 %s：新增 %d 个模型，恢复 %d 个",
+                    channel["id"], len(added), len(revived),
+                )
         except Exception:
             log.warning("自动同步模型异常 channel=%s", channel["id"], exc_info=True)

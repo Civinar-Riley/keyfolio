@@ -41,8 +41,14 @@ def _set_session_cookie(response: Response, token: str) -> None:
 
 
 @router.get("/status")
-def status():
-    return auth.status()
+def status(request: Request):
+    return auth.status(request)
+
+
+@router.post("/lock")
+def lock(request: Request):
+    auth.lock_session(auth.require_session(request))
+    return {"ok": True}
 
 
 @router.post("/setup")

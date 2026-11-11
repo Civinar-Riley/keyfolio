@@ -1,5 +1,5 @@
 /** 一键导出：模板管理 + 渲染复制/下载。 */
-import { api } from "../api.js";
+import { api, copyText } from "../api.js";
 
 export const ExportView = {
   template: `
@@ -115,7 +115,7 @@ export const ExportView = {
     },
     async copyOut() {
       try {
-        await navigator.clipboard.writeText(this.result);
+        await copyText(this.result);
         this.$toast("已复制（含 Key 明文，注意保管）", "ok");
       } catch (e) { this.$toast(e.message, "err"); }
     },

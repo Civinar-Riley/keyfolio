@@ -147,7 +147,12 @@ def _validate(data: dict) -> None:
 
 
 def _import_overwrite(data: dict, data_key: bytes, backup_data_key) -> bool:
-    relogin = False
+    auth_block = data.get("auth") or {}
+    # 加密备份的 Key 密文与备份里的 data key 绑定；覆盖导入恢复 auth 块时
+    # 必须原样保留密文，否则重登后 data key 与密文对不上。
+    restore_auth = bool(auth_block) and all(
+        row.get("value_encrypted") for row in data["keys"]
+    )
     with db.get_conn() as conn:
         for table in TABLES:
             conn.execute(f"DELETE FROM {table}")
@@ -155,7 +160,12 @@ def _import_overwrite(data: dict, data_key: bytes, backup_data_key) -> bool:
             sql, params = _insert_sql(conn, "channels", row)
             conn.execute(sql, params)
         for row in data["keys"]:
-            value_enc = _prepare_key_value(row, data_key, backup_data_key)
+            if restore_auth:
+                value_enc = row.get("value_enc") or ""
+                if not value_enc:
+                    raise HTTPException(400, "备份里的 Key 缺少密文，无法恢复")
+            else:
+                value_enc = _prepare_key_value(row, data_key, backup_data_key)
             row = {**row, "value_enc": value_enc}
             sql, params = _insert_sql(conn, "keys", row)
             conn.execute(sql, params)
@@ -163,13 +173,12 @@ def _import_overwrite(data: dict, data_key: bytes, backup_data_key) -> bool:
             for row in data.get(table, []):
                 sql, params = _insert_sql(conn, table, row)
                 conn.execute(sql, params)
-    if data.get("auth"):
+    if restore_auth:
         # 在连接关闭后再恢复认证块，避免同线程嵌套写连接锁库
-        auth.restore_auth_state(data["auth"])
-        relogin = True
-    if relogin:
+        auth.restore_auth_state(auth_block)
         auth.drop_all_sessions()
-    return relogin
+        return True
+    return False
 
 
 def _import_merge(data: dict, data_key: bytes, backup_data_key) -> dict:

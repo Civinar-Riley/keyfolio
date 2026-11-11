@@ -16,6 +16,10 @@ async function request(method, path, body) {
     }
     throw new Error(data.detail || "未登录");
   }
+  if (resp.status === 423 && !path.startsWith("/api/auth/")) {
+    window.dispatchEvent(new CustomEvent("kf:locked"));
+    throw new Error(data.detail || "已锁定，请先解锁");
+  }
   if (!resp.ok) {
     const detail = data.detail;
     const msg = typeof detail === "string"
@@ -37,10 +41,44 @@ export const api = {
 
 export function fmtTime(ts) {
   if (!ts) return "—";
-  return ts.replace("T", " ").replace("Z", "").replace(" UTC", "");
+  const date = new Date(ts);
+  if (Number.isNaN(date.getTime())) return ts;
+  return date.toLocaleString(undefined, {
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit",
+  });
 }
 
 export function fmtBalance(k) {
   if (k.balance === null || k.balance === undefined) return "—";
   return `${k.balance} ${k.currency || ""}`;
+}
+
+export function expiryInfo(value) {
+  if (!value) return null;
+  const text = String(value).trim();
+  const date = new Date(text.length === 10 ? text + "T23:59:59" : text);
+  if (Number.isNaN(date.getTime())) return { text, cls: "" };
+  const days = Math.ceil((date.getTime() - Date.now()) / 86400000);
+  if (days < 0) return { text: `已过期 ${text}`, cls: "fail" };
+  if (days <= 7) return { text: `${days} 天后到期`, cls: "warn" };
+  return { text: `到期 ${text}`, cls: "" };
+}
+
+export async function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  // 局域网 HTTP 没有 Clipboard API，退回 textarea + execCommand
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  document.body.appendChild(area);
+  area.select();
+  const ok = document.execCommand("copy");
+  document.body.removeChild(area);
+  if (!ok) throw new Error("复制失败，请手动选择文本");
 }

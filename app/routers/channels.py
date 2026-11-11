@@ -1,9 +1,12 @@
 """渠道与 Key 的 CRUD、验证、余额查询。"""
+from urllib.parse import urlsplit
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from .. import auth, crypto, db, services
 from ..adapters import registry
+from ..adapters.base import normalize_base
 
 router = APIRouter(prefix="/api", tags=["channels"])
 
@@ -16,6 +19,15 @@ def mask_key(value: str) -> str:
 
 def require_data_key(request: Request) -> bytes:
     return auth.require_data_key(request)
+
+
+def clean_base_url(value: str) -> str:
+    base = normalize_base(value)
+    if not base.startswith(("http://", "https://")):
+        raise HTTPException(400, "Base URL 必须以 http:// 或 https:// 开头")
+    if not urlsplit(base).netloc:
+        raise HTTPException(400, "Base URL 缺少主机名")
+    return base
 
 
 class ChannelIn(BaseModel):
@@ -41,6 +53,7 @@ class KeyIn(BaseModel):
     name: str
     value: str
     notes: str = ""
+    expires_at: str = ""
     enabled: bool = True
 
 
@@ -48,6 +61,7 @@ class KeyPatch(BaseModel):
     name: str | None = None
     value: str | None = None
     notes: str | None = None
+    expires_at: str | None = None
     enabled: bool | None = None
 
 
@@ -88,9 +102,11 @@ def list_channels(_=Depends(require_data_key)):
         channels = conn.execute("SELECT * FROM channels ORDER BY id").fetchall()
         keys = conn.execute("SELECT * FROM keys ORDER BY id").fetchall()
         counts = {
-            r["channel_id"]: r["c"]
+            r["channel_id"]: {"total": r["c"], "enabled": r["e"]}
             for r in conn.execute(
-                "SELECT channel_id, COUNT(*) AS c FROM models GROUP BY channel_id"
+                "SELECT channel_id, COUNT(*) AS c, "
+                "SUM(CASE WHEN enabled=1 THEN 1 ELSE 0 END) AS e "
+                "FROM models GROUP BY channel_id"
             ).fetchall()
         }
     keys_by_channel: dict[int, list] = {}
@@ -101,11 +117,13 @@ def list_channels(_=Depends(require_data_key)):
             {
                 **channel_dict(channel),
                 "keys": keys_by_channel.get(channel["id"], []),
-                "models_count": counts.get(channel["id"], 0),
+                "models_count": counts.get(channel["id"], {}).get("total", 0),
+                "models_enabled": counts.get(channel["id"], {}).get("enabled", 0),
             }
             for channel in channels
         ],
         "channel_types": registry.CHANNEL_TYPES,
+        "providers": registry.PROVIDERS,
         "model_types": registry.MODEL_TYPES,
     }
 
@@ -113,11 +131,15 @@ def list_channels(_=Depends(require_data_key)):
 @router.post("/channels")
 def create_channel(payload: ChannelIn, request: Request, _=Depends(require_data_key)):
     _check_type(payload.type)
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(400, "渠道名称不能为空")
+    base_url = clean_base_url(payload.base_url)
     with db.get_conn() as conn:
         cur = conn.execute(
             "INSERT INTO channels(name, type, base_url, console_url, grp, notes, enabled, created_at) "
             "VALUES(?,?,?,?,?,?,1,?)",
-            (payload.name.strip(), payload.type, payload.base_url.strip(),
+            (name, payload.type, base_url,
              payload.console_url.strip(), payload.grp.strip(), payload.notes, db.now()),
         )
         channel_id = cur.lastrowid
@@ -131,6 +153,12 @@ def update_channel(channel_id: int, payload: ChannelPatch, _=Depends(require_dat
     if payload.type is not None:
         _check_type(payload.type)
     fields = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if "name" in fields:
+        fields["name"] = fields["name"].strip()
+        if not fields["name"]:
+            raise HTTPException(400, "渠道名称不能为空")
+    if "base_url" in fields:
+        fields["base_url"] = clean_base_url(fields["base_url"])
     if not fields:
         return {"ok": True}
     sets = ", ".join(f"{name}=?" for name in fields)
@@ -158,10 +186,11 @@ def create_key(channel_id: int, payload: KeyIn, request: Request):
         raise HTTPException(400, "Key 值不能为空")
     with db.get_conn() as conn:
         cur = conn.execute(
-            "INSERT INTO keys(channel_id, name, value_enc, notes, enabled, created_at) VALUES(?,?,?,?,?,?)",
+            "INSERT INTO keys(channel_id, name, value_enc, notes, expires_at, enabled, created_at) "
+            "VALUES(?,?,?,?,?,?,?)",
             (channel_id, payload.name.strip() or "Key",
              crypto.field_encrypt(data_key, value), payload.notes,
-             1 if payload.enabled else 0, db.now()),
+             payload.expires_at.strip(), 1 if payload.enabled else 0, db.now()),
         )
         key_id = cur.lastrowid
     return {"ok": True, "id": key_id}
@@ -182,6 +211,8 @@ def update_key(key_id: int, payload: KeyPatch, request: Request):
             k: v for k, v in payload.model_dump().items()
             if v is not None and k != "value"
         }
+        if "expires_at" in fields:
+            fields["expires_at"] = str(fields["expires_at"]).strip()
         if fields:
             sets = ", ".join(f"{name}=?" for name in fields)
             conn.execute(f"UPDATE keys SET {sets} WHERE id=?", (*fields.values(), key_id))

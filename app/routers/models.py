@@ -17,6 +17,7 @@ class KeyOptIn(BaseModel):
 class SyncIn(BaseModel):
     added: list[str] = []
     removed: list[str] = []
+    revived: list[str] = []
     removed_action: str = "disable"  # disable | delete
 
 
@@ -95,7 +96,9 @@ def sync_models(channel_id: int, payload: SyncIn, _=Depends(require_data_key)):
     _channel(channel_id)
     if payload.removed_action not in ("disable", "delete"):
         raise HTTPException(400, "removed_action 只能是 disable 或 delete")
-    result = services.apply_sync(channel_id, payload.added, payload.removed, payload.removed_action)
+    result = services.apply_sync(
+        channel_id, payload.added, payload.removed, payload.removed_action, payload.revived
+    )
     return {"ok": True, **result}
 
 
@@ -108,8 +111,10 @@ def add_model(channel_id: int, payload: ModelIn, _=Depends(require_data_key)):
     mtype = payload.mtype or registry.classify_model(model_id)
     with db.get_conn() as conn:
         conn.execute(
-            "INSERT INTO models(channel_id, model_id, mtype, notes, enabled, fetched_at) VALUES(?,?,?,?,1,?) "
-            "ON CONFLICT(channel_id, model_id) DO UPDATE SET enabled=1, mtype=excluded.mtype, notes=excluded.notes",
+            "INSERT INTO models(channel_id, model_id, mtype, notes, enabled, auto_disabled, fetched_at) "
+            "VALUES(?,?,?,?,1,0,?) "
+            "ON CONFLICT(channel_id, model_id) DO UPDATE SET "
+            "enabled=1, auto_disabled=0, mtype=excluded.mtype, notes=excluded.notes",
             (channel_id, model_id, mtype, payload.notes, db.now()),
         )
     return {"ok": True}
@@ -123,8 +128,10 @@ def add_models_batch(channel_id: int, payload: BatchIn, _=Depends(require_data_k
     with db.get_conn() as conn:
         for model_id in dict.fromkeys(i.strip() for i in payload.ids if i.strip()):
             conn.execute(
-                "INSERT INTO models(channel_id, model_id, mtype, enabled, fetched_at) VALUES(?,?,?,1,?) "
-                "ON CONFLICT(channel_id, model_id) DO UPDATE SET enabled=1, fetched_at=excluded.fetched_at",
+                "INSERT INTO models(channel_id, model_id, mtype, enabled, auto_disabled, fetched_at) "
+                "VALUES(?,?,?,1,0,?) "
+                "ON CONFLICT(channel_id, model_id) DO UPDATE SET "
+                "enabled=1, auto_disabled=0, fetched_at=excluded.fetched_at",
                 (channel_id, model_id, registry.classify_model(model_id), now),
             )
             added += 1
@@ -173,6 +180,10 @@ def update_model(model_id: int, payload: ModelPatch, _=Depends(require_data_key)
     fields = {k: v for k, v in payload.model_dump().items() if v is not None}
     if not fields:
         return {"ok": True}
+    if "enabled" in fields:
+        # 手动启停后不再算“自动停用”，后续同步不会覆盖用户选择
+        fields["auto_disabled"] = 0
+        fields["fetched_at"] = db.now()
     sets = ", ".join(f"{name}=?" for name in fields)
     with db.get_conn() as conn:
         cur = conn.execute(f"UPDATE models SET {sets} WHERE id=?", (*fields.values(), model_id))

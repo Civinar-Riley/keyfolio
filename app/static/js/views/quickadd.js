@@ -84,16 +84,16 @@ export const QuickAddView = {
       this.verifyResult = null;
       try {
         this.verifyResult = await api.post("/api/quickadd/verify", {
-          base_url: this.form.base_url, key: this.form.key,
+          base_url: this.form.base_url, key: this.form.key, type: this.form.type,
         });
       } catch (e) { this.verifyResult = { ok: false, error: e.message }; }
     },
     async save() {
       try {
         const r = await api.post("/api/quickadd/save", {
-          name: this.form.name, base_url: this.form.base_url, key: this.form.key,
+          name: this.form.name, base_url: this.form.base_url, key: this.form.key, type: this.form.type,
         });
-        this.$toast(`已入库：${r.type} 类型渠道`, "ok");
+        this.$toast(r.created ? `已入库：${r.type} 类型渠道` : `已追加到现有渠道（${r.type}）`, "ok");
         this.raw = ""; this.parsed = null; this.verifyResult = null;
         this.$goto("/channels");
       } catch (e) { this.$toast(e.message, "err"); }

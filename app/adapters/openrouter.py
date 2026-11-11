@@ -5,7 +5,7 @@
 """
 import httpx
 
-from .base import AdapterError, get_json, origin, DEFAULT_TIMEOUT
+from .base import AdapterError, DEFAULT_TIMEOUT, get_json, make_client, origin
 
 
 async def fetch_balance(base_url: str, key: str) -> dict:
@@ -30,7 +30,7 @@ async def fetch_balance(base_url: str, key: str) -> dict:
     # 普通 Key 回退：/api/v1/key
     hdrs = {"Authorization": f"Bearer {key}"}
     try:
-        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, follow_redirects=True) as client:
+        async with make_client(DEFAULT_TIMEOUT) as client:
             resp = await client.get(base + "/api/v1/key", headers=hdrs)
     except httpx.HTTPError:
         raise AdapterError("403：/credits 需要管理型 Key，回退接口也请求失败")

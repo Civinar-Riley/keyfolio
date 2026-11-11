@@ -1,5 +1,5 @@
 /** 统一看板：汇总统计 + 筛选排序 + 余额趋势图（Chart.js）。 */
-import { api, fmtBalance, fmtTime } from "../api.js";
+import { api, expiryInfo, fmtBalance, fmtTime } from "../api.js";
 
 export const DashboardView = {
   template: `
@@ -36,7 +36,11 @@ export const DashboardView = {
               <b>{{ r.channel.name }}</b> <span class="badge">{{ r.key.name }}</span>
               <div class="hint">{{ r.channel.grp || "" }}</div>
             </td>
-            <td class="mono"><b>{{ fmtBalance(r.key) }}</b><div class="hint" v-if="r.key.expires_at">到期 {{ r.key.expires_at }}</div></td>
+            <td class="mono"><b>{{ fmtBalance(r.key) }}</b>
+              <div class="hint" v-if="expiryOf(r.key)">
+                <span class="badge" :class="expiryOf(r.key).cls">{{ expiryOf(r.key).text }}</span>
+              </div>
+            </td>
             <td>
               <span class="badge" :class="badgeClass(r.key)">{{ badgeText(r.key) }}</span>
             </td>
@@ -51,6 +55,14 @@ export const DashboardView = {
       <div class="modal">
         <h3>{{ trend.key.name }} · 余额趋势 <span class="badge">{{ trend.key.currency }}</span></h3>
         <p class="hint">当前 {{ trend.key.balance }} {{ trend.key.currency }} · 共 {{ trend.records.length }} 条记录</p>
+        <label class="field" style="max-width:180px">范围
+          <select v-model.number="trendDays" @change="loadTrend">
+            <option :value="7">最近 7 天</option>
+            <option :value="30">最近 30 天</option>
+            <option :value="90">最近 90 天</option>
+            <option :value="365">最近一年</option>
+          </select>
+        </label>
         <canvas id="trend-chart" height="220"></canvas>
         <div class="hint" v-if="!trend.records.length" style="text-align:center; padding:10px">该 Key 还没有余额记录</div>
         <div class="btn-row" style="margin-top:12px">
@@ -62,7 +74,7 @@ export const DashboardView = {
   data: () => ({
     summary: {}, channels: [], channelTypes: [],
     fGroup: "", fType: "", sortBy: "balance_desc",
-    trend: null, chart: null,
+    trend: null, trendKeyId: null, trendDays: 90, chart: null,
   }),
   computed: {
     groups() {
@@ -91,6 +103,7 @@ export const DashboardView = {
   async created() { await this.load(); },
   methods: {
     fmtBalance, fmtTime,
+    expiryOf(k) { return expiryInfo(k.expires_at); },
     badgeClass(k) {
       if (!k.enabled) return "warn";
       if (k.last_check === "ok") return "ok";
@@ -111,7 +124,12 @@ export const DashboardView = {
       this.channelTypes = t.channel_types;
     },
     async openTrend(k) {
-      const r = await api.get(`/api/dashboard/trend?key_id=${k.id}&days=90`);
+      this.trendKeyId = k.id;
+      await this.loadTrend();
+    },
+    async loadTrend() {
+      if (!this.trendKeyId) return;
+      const r = await api.get(`/api/dashboard/trend?key_id=${this.trendKeyId}&days=${this.trendDays}`);
       if (!r.ok) { this.$toast(r.error, "err"); return; }
       this.trend = r;
       this.$nextTick(() => this.drawChart());
@@ -146,6 +164,7 @@ export const DashboardView = {
     closeTrend() {
       if (this.chart) { this.chart.destroy(); this.chart = null; }
       this.trend = null;
+      this.trendKeyId = null;
     },
   },
 };

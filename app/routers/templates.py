@@ -5,11 +5,16 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from .. import db, services
+from ..adapters.base import api_base
 from .channels import require_data_key
 
 router = APIRouter(prefix="/api/templates", tags=["templates"])
 
-PLACEHOLDERS = ["{channel_name}", "{key_name}", "{base_url}", "{key}", "{models}", "{models_json}", "{channel_type}"]
+PLACEHOLDERS = [
+    "{channel_name}", "{key_name}", "{channel_type}",
+    "{base_url}", "{api_base}", "{key}",
+    "{model}", "{models}", "{models_json}",
+]
 
 
 class TemplateIn(BaseModel):
@@ -91,14 +96,17 @@ def render_template(payload: RenderIn, _=Depends(require_data_key)):
     model_ids = [r["model_id"] for r in model_rows]
 
     rendered = tpl["json_template"]
+    base_api = api_base(channel["base_url"], "v1beta" if channel["type"] == "gemini" else "v1")
     for placeholder, value in {
         "{channel_name}": channel["name"],
         "{key_name}": key_row["name"],
         "{base_url}": channel["base_url"],
+        "{api_base}": base_api,
         "{key}": services.key_plaintext(key_row),
         "{models}": ", ".join(model_ids),
         "{models_json}": json.dumps(model_ids, ensure_ascii=False, indent=2),
         "{channel_type}": channel["type"],
+        "{model}": model_ids[0] if model_ids else "",
     }.items():
         rendered = rendered.replace(placeholder, value)
 

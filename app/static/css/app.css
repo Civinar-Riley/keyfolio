@@ -198,7 +198,8 @@ table.list th { color: var(--muted); font-weight: 500; font-size: 12px; }
   .page h2 { font-size: 18px; }
   .stat .v { font-size: 19px; }
   table.list { font-size: 12.5px; }
-  table.list th:nth-child(n+4), table.list td:nth-child(n+4) { display: none; }
+  table.list th, table.list td { padding: 7px 6px; }
+  table.list td.mono { word-break: break-all; }
   .modal { max-height: 92vh; }
 }
 @media (max-width: 767px) {

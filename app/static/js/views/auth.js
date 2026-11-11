@@ -1,5 +1,5 @@
 /** 初始化向导 + 登录 + 恢复码重置。 */
-import { api } from "../api.js";
+import { api, copyText } from "../api.js";
 
 export const SetupView = {
   emits: ["done"],
@@ -25,6 +25,7 @@ export const SetupView = {
           <h3>恢复码（只显示这一次）</h3>
           <p class="hint">用于忘记主密码时重置。请立即保存到安全的地方（密码管理器 / 纸条）。</p>
           <div class="recovery-box">{{ recovery }}</div>
+          <button class="btn" style="width:100%; margin-bottom:8px" @click="copyRecovery">复制恢复码</button>
           <button class="btn primary" style="width:100%" @click="$emit('done')">我已保存，进入系统</button>
         </template>
       </div>
@@ -32,6 +33,12 @@ export const SetupView = {
   </div>`,
   data: () => ({ password: "", confirm: "", recovery: "", stage: "form", busy: false, error: "" }),
   methods: {
+    async copyRecovery() {
+      try {
+        await copyText(this.recovery);
+        this.$toast("恢复码已复制", "ok");
+      } catch (e) { this.$toast(e.message, "err"); }
+    },
     async submit() {
       if (this.password !== this.confirm) { this.error = "两次输入不一致"; return; }
       this.busy = true; this.error = "";
@@ -84,6 +91,7 @@ export const LoginView = {
       <div class="card" v-if="newRecovery">
         <h3>新恢复码（只显示这一次）</h3>
         <div class="recovery-box">{{ newRecovery }}</div>
+        <button class="btn" style="width:100%; margin-bottom:8px" @click="copyNewRecovery">复制新恢复码</button>
         <button class="btn ok" style="width:100%" @click="finishRecovery">我已保存</button>
       </div>
     </div>
@@ -120,6 +128,12 @@ export const LoginView = {
       this.newRecovery = "";
       this.recCode = ""; this.recNew = "";
       this.$emit("logged-in");
+    },
+    async copyNewRecovery() {
+      try {
+        await copyText(this.newRecovery);
+        this.$toast("新恢复码已复制", "ok");
+      } catch (e) { this.$toast(e.message, "err"); }
     },
   },
 };

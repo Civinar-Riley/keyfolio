@@ -28,37 +28,39 @@ const App = {
 
     <!-- 主界面 -->
     <template v-else>
-      <header class="topbar">
-        <a class="brand" href="#/dashboard">⬡ Keyfolio</a>
-        <nav class="nav">
-          <a v-for="n in nav" :key="n.id" :href="'#' + n.path" :class="{active: route===n.path}">{{ n.icon }} {{ n.label }}</a>
+      <template v-if="!locked">
+        <header class="topbar">
+          <a class="brand" href="#/dashboard">⬡ Keyfolio</a>
+          <nav class="nav">
+            <a v-for="n in nav" :key="n.id" :href="'#' + n.path" :class="{active: route===n.path}">{{ n.icon }} {{ n.label }}</a>
+          </nav>
+          <span class="spacer"></span>
+          <button class="btn sm" @click="lock">🔒 锁屏</button>
+          <button class="btn sm danger m-hide" @click="logout">登出</button>
+        </header>
+
+        <nav class="bottomnav">
+          <a v-for="n in nav" :key="n.id" :href="'#' + n.path" :class="{active: route===n.path}">
+            <span class="ico">{{ n.icon }}</span>{{ n.label }}
+          </a>
         </nav>
-        <span class="spacer"></span>
-        <button class="btn sm" @click="lock">🔒 锁屏</button>
-        <button class="btn sm danger m-hide" @click="logout">登出</button>
-      </header>
 
-      <nav class="bottomnav">
-        <a v-for="n in nav" :key="n.id" :href="'#' + n.path" :class="{active: route===n.path}">
-          <span class="ico">{{ n.icon }}</span>{{ n.label }}
-        </a>
-      </nav>
+        <main class="page">
+          <component :is="viewComp" :key="route" @lock="lock" @logout="logout"></component>
+        </main>
+      </template>
 
-      <main class="page">
-        <component :is="viewComp" :key="route" @lock="lock" @logout="logout"></component>
-      </main>
+      <!-- 锁屏：服务端同时拒绝数据接口，刷新页面仍保持锁定 -->
+      <div class="lock-mask" v-if="locked">
+        <div style="font-size:40px">🔒</div>
+        <div>已锁定，输入主密码解锁</div>
+        <form style="width:min(320px, 90vw)" @submit.prevent="unlock">
+          <label class="field"><input type="password" v-model="unlockPw" autofocus style="text-align:center"></label>
+          <div v-if="unlockErr" class="toast err" style="margin-bottom:8px">{{ unlockErr }}</div>
+          <button class="btn primary" style="width:100%" :disabled="!unlockPw">解锁</button>
+        </form>
+      </div>
     </template>
-
-    <!-- 锁屏遮罩 -->
-    <div class="lock-mask" v-if="locked">
-      <div style="font-size:40px">🔒</div>
-      <div>已锁定，输入主密码解锁</div>
-      <form style="width:min(320px, 90vw)" @submit.prevent="unlock">
-        <label class="field"><input type="password" v-model="unlockPw" autofocus style="text-align:center"></label>
-        <div v-if="unlockErr" class="toast err" style="margin-bottom:8px">{{ unlockErr }}</div>
-        <button class="btn primary" style="width:100%" :disabled="!unlockPw">解锁</button>
-      </form>
-    </div>
 
     <div class="toasts">
       <div v-for="t in toasts" :key="t.id" class="toast" :class="t.kind">{{ t.text }}</div>
@@ -94,12 +96,23 @@ const App = {
     window.addEventListener("hashchange", () => this.readRoute());
     window.addEventListener("kf:unauthorized", () => {
       this.authed = false;
+      this.locked = false;
       this.toast("会话失效，请重新登录", "err");
+    });
+    window.addEventListener("kf:locked", () => {
+      this.locked = true;
+      this.unlockPw = "";
+      this.unlockErr = "";
     });
     this.readRoute();
     try {
       const s = await api.get("/api/auth/status");
       this.configured = s.configured;
+      if (s.configured) {
+        // 刷新页面时沿用服务端会话，不再强制重新登录
+        this.authed = !!s.authenticated;
+        this.locked = !!s.screen_locked;
+      }
     } catch { this.configured = true; }
   },
   methods: {
@@ -116,7 +129,14 @@ const App = {
       this.route = "";
       nextTick(() => { this.route = key; });
     },
-    lock() { this.locked = true; this.unlockPw = ""; this.unlockErr = ""; },
+    async lock() {
+      try {
+        await api.post("/api/auth/lock");
+        this.locked = true;
+        this.unlockPw = "";
+        this.unlockErr = "";
+      } catch (e) { this.toast(e.message, "err"); }
+    },
     async unlock() {
       this.unlockErr = "";
       try {
@@ -128,6 +148,7 @@ const App = {
     async logout() {
       try { await api.post("/api/auth/logout"); } catch {}
       this.authed = false;
+      this.locked = false;
     },
     toast(text, kind = "") {
       const id = ++this.toastSeq;
