@@ -24,4 +24,4 @@ else:
     STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 HOST = os.environ.get("KEYFOLIO_HOST", "127.0.0.1")
-PORT = int(os.environ.get("KEYFOLIO_PORT", "3000"))
+PORT = int(os.environ.get("KEYFOLIO_PORT", "7465"))

@@ -31,17 +31,17 @@ Manage all your API keys from one local tool: store credentials, verify keys, pu
 
 ```bash
 docker compose up -d
-# open http://<host>:3000
+# open http://<host>:7465
 ```
 
-Data volume is mounted at `./data:/app/data`; migration = copying the `data/` folder. Env vars: `KEYFOLIO_PORT` (default 3000), `TZ`.
+Data volume is mounted at `./data:/app/data`; migration = copying the `data/` folder. Env vars: `KEYFOLIO_PORT` (default 7465), `TZ`.
 
 ### Native
 
 ```bash
 pip install -r requirements.txt
 python main.py
-# default http://127.0.0.1:3000; override with KEYFOLIO_HOST / KEYFOLIO_PORT / KEYFOLIO_DATA_DIR
+# default http://127.0.0.1:7465; override with KEYFOLIO_HOST / KEYFOLIO_PORT / KEYFOLIO_DATA_DIR
 ```
 
 ### Windows exe

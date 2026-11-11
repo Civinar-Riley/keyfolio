@@ -5,9 +5,9 @@ services:
     container_name: keyfolio
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "7465:7465"
     volumes:
       - ./data:/app/data
     environment:
       - TZ=Asia/Shanghai
-      # - KEYFOLIO_PORT=3000
+      # - KEYFOLIO_PORT=7465

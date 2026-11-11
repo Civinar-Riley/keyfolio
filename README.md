@@ -33,17 +33,17 @@ English | [中文](README.md)
 
 ```bash
 docker compose up -d
-# 浏览器打开 http://<主机IP>:3000
+# 浏览器打开 http://<主机IP>:7465
 ```
 
-数据卷挂载 `./data:/app/data`，迁移 = 复制 `data/` 目录。环境变量：`KEYFOLIO_PORT`（默认 3000）、`TZ`。
+数据卷挂载 `./data:/app/data`，迁移 = 复制 `data/` 目录。环境变量：`KEYFOLIO_PORT`（默认 7465）、`TZ`。
 
 ### 原生运行
 
 ```bash
 pip install -r requirements.txt
 python main.py
-# 默认 http://127.0.0.1:3000，可用环境变量 KEYFOLIO_HOST / KEYFOLIO_PORT / KEYFOLIO_DATA_DIR 覆盖
+# 默认 http://127.0.0.1:7465，可用环境变量 KEYFOLIO_HOST / KEYFOLIO_PORT / KEYFOLIO_DATA_DIR 覆盖
 ```
 
 Linux 可用 systemd 开机自启（`ExecStart=/usr/bin/python3 /path/to/main.py`）。
