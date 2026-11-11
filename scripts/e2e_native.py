@@ -166,6 +166,21 @@ ok(enc_backup["encrypted"] is True, "加密导出")
 r = client.post("/api/backup/import", json={"backup": plain_backup, "mode": "merge"})
 ok(r.json()["ok"] is True and r.json()["channels"] == 0, "明文合并：渠道去重 0 新增")
 
+# 删除一条渠道后再合并，验证旧 id 不会撞主键、且新 Key 能插入
+quickadd_chan = channels[1]["id"]
+client.delete(f"/api/channels/{quickadd_chan}")
+r = client.post("/api/backup/import", json={"backup": plain_backup, "mode": "merge"})
+ok(r.json()["ok"] is True and r.json()["channels"] == 1 and r.json()["keys"] == 1,
+   "合并导入：被删渠道及其 Key 重新插入（旧 id 不冲突）")
+
+# Base URL 自带 /v1 后缀时不应拼出 /v1/v1/models
+v1_chan = client.post("/api/channels", json={
+    "name": "Mock 带 v1", "type": "gateway", "base_url": BASE + "/v1"}).json()["id"]
+v1_key = client.post(f"/api/channels/{v1_chan}/keys", json={"name": "v1k", "value": "sk-v1-123"}).json()["id"]
+r = client.post(f"/api/keys/{v1_key}/verify", json={"mode": "models"})
+ok(r.json()["ok"] is True and len(r.json()["models"]) == 5, "Base URL 带 /v1 后缀也能拉模型")
+client.delete(f"/api/channels/{v1_chan}")
+
 client2 = TestClient(app)
 r = client2.post("/api/auth/login", json={"password": PASSWORD})
 ok(r.status_code == 200, "第二个会话登录")
@@ -201,20 +216,30 @@ r = client4.post("/api/auth/login", json={"password": PASSWORD, "totp_code": bac
 ok(r.status_code == 200, "未使用过的备用码可登录")
 client4.post("/api/auth/totp/disable", json={"password": PASSWORD})
 
-print("== 连错锁定与恢复码 ==")
+print("== 连错锁定与恢复码（TOTP 开启状态下走逃生舱） ==")
+r = client2.post("/api/auth/totp/setup")
+secret2 = r.json()["secret"]
+r = client2.post("/api/auth/totp/enable", json={"code": pyotp.TOTP(secret2).now()})
+ok(r.status_code == 200, "为逃生舱场景重新开启 TOTP")
+
 client5 = TestClient(app)
 for _ in range(5):
     r = client5.post("/api/auth/login", json={"password": "bad guess"})
 ok(r.status_code == 423, "连错 5 次触发锁定")
-r = client5.post("/api/auth/login", json={"password": PASSWORD, "totp_code": pyotp.TOTP(secret).now()})
+r = client5.post("/api/auth/login", json={"password": PASSWORD})
 ok(r.status_code == 423, "锁定期间正确密码也被拒")
 
 r = client5.post("/api/auth/recovery-reset", json={"recovery_code": recovery_code, "new_password": "new-password-456"})
 new_code = r.json()["recovery_code"]
 ok(r.status_code == 200 and new_code != recovery_code, "恢复码重置密码并生成新恢复码")
 
+r = client5.get("/api/channels")
+ok(r.status_code == 200, "重置后自动登录（会话可直接用）")
+r = client5.get("/api/auth/status")
+ok(r.json()["totp_enabled"] is False, "重置同时清掉 TOTP（验证器丢了也能进）")
+
 r = client5.post("/api/auth/login", json={"password": "new-password-456"})
-ok(r.status_code == 200, "新密码登录成功（旧恢复码已失效）")
+ok(r.status_code == 200, "新密码登录成功（无需 TOTP、旧恢复码已失效）")
 
 print("== 改密码 ==")
 r = client5.post("/api/auth/change-password", json={"old_password": "new-password-456", "new_password": PASSWORD})

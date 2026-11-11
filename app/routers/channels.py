@@ -74,7 +74,11 @@ def channel_dict(row) -> dict:
 def _key_dict(row) -> dict:
     data = dict(row)
     data.pop("value_enc", None)
-    data["value_masked"] = mask_key(services.key_plaintext(row))
+    try:
+        data["value_masked"] = mask_key(services.key_plaintext(row))
+    except Exception:
+        # 密文与当前 data key 不匹配（如导入了别的库的备份）时不拖垮整页
+        data["value_masked"] = "****"
     return data
 
 

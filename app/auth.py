@@ -184,7 +184,7 @@ def login(password: str, totp_code: str = "") -> str:
 
 
 def _check_second_factor(data_key: bytes, code: str) -> bool:
-    code = code.strip().lower()
+    code = (code or "").strip().lower()
     secret_blob = db.get_setting(K_TOTP_SECRET)
     if secret_blob:
         try:
@@ -192,12 +192,11 @@ def _check_second_factor(data_key: bytes, code: str) -> bool:
             if pyotp.TOTP(secret).verify(code, valid_window=1):
                 return True
         except Exception:
-            return False
+            pass  # 密钥解不开时仍允许用备用码
     hashes = db.get_setting(K_BACKUP_CODES, [])
     for h in hashes:
         if crypto.code_matches(code, h):
-            rest = [x for x in hashes if x != h]
-            db.set_setting(K_BACKUP_CODES, rest)
+            db.set_setting(K_BACKUP_CODES, [x for x in hashes if x != h])
             return True
     return False
 
@@ -205,9 +204,11 @@ def _check_second_factor(data_key: bytes, code: str) -> bool:
 def unlock(request: Request, password: str) -> None:
     require_session(request)
     if is_locked():
-        raise _http(423, "已锁定，请稍后再试")
+        raise _locked_error()
     if not _verify_password(password):
         _register_fail()
+        if is_locked():
+            raise _locked_error()
         raise _http(401, "主密码错误")
     _clear_fail()
 
@@ -255,6 +256,11 @@ def recovery_reset(recovery_code: str, new_password: str) -> str:
     kdf = crypto.make_kdf_params()
     db.set_setting(K_PW_KDF, kdf)
     db.set_setting(K_PW_HASH, crypto.hash_password(new_password, kdf))
+    # 恢复码是最后逃生通道：重置后清掉 TOTP，避免验证器丢了也进不来
+    db.delete_setting(K_TOTP_SECRET)
+    db.delete_setting(K_TOTP_ENABLED)
+    db.delete_setting(K_BACKUP_CODES)
+    db.delete_setting(K_TOTP_PENDING)
     _clear_fail()
     drop_all_sessions()
     return new_code
@@ -326,6 +332,16 @@ def export_auth_state() -> dict[str, Any]:
     return out
 
 
+AUTH_KEYS = (
+    K_PW_HASH, K_PW_KDF, K_WRAP_PW, K_WRAP_RC, K_RC_HASH,
+    K_TOTP_SECRET, K_TOTP_ENABLED, K_TOTP_PENDING, K_BACKUP_CODES,
+)
+
+
 def restore_auth_state(block: dict[str, Any]) -> None:
+    """整块替换认证状态：先清干净，避免备份没有的开关（如 TOTP）残留当前值。"""
+    for key in AUTH_KEYS:
+        db.delete_setting(key)
     for key, value in block.items():
-        db.set_setting(key, value)
+        if key in AUTH_KEYS:
+            db.set_setting(key, value)

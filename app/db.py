@@ -75,6 +75,7 @@ def init(db_path: Path) -> None:
     global _db_path
     _db_path = str(db_path)
     with get_conn() as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
         version = _schema_version(conn)
         for target in range(version, SCHEMA_VERSION):
             sql = MIGRATIONS.get(target + 1)

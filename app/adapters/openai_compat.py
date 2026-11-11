@@ -1,9 +1,20 @@
-"""OpenAI 兼容：模型拉取与对话测试的通用实现，也是大多数渠道类型的默认。"""
+"""OpenAI 兼容：模型拉取与对话测试的通用实现，也是大多数渠道类型的默认。
+
+Base URL 允许带或不带 /v1 后缀（用户从控制台复制的地址经常带），
+拼接时保证版本段只出现一次。
+"""
 from .base import get_json, normalize_base, post_json
 
 
+def _api_url(base_url: str, suffix: str) -> str:
+    base = normalize_base(base_url)
+    if base.lower().endswith("/v1"):
+        return base + suffix
+    return base + "/v1" + suffix
+
+
 async def fetch_models(base_url: str, key: str) -> list[str]:
-    data = await get_json(normalize_base(base_url) + "/v1/models", key)
+    data = await get_json(_api_url(base_url, "/models"), key)
     items = data.get("data") if isinstance(data, dict) else data
     if not isinstance(items, list):
         items = []
@@ -22,5 +33,5 @@ async def chat_test(base_url: str, key: str, model: str) -> str:
         "messages": [{"role": "user", "content": "ping"}],
         "max_tokens": 1,
     }
-    await post_json(normalize_base(base_url) + "/v1/chat/completions", payload, key)
+    await post_json(_api_url(base_url, "/chat/completions"), payload, key)
     return f"对话请求成功（model={model}）"

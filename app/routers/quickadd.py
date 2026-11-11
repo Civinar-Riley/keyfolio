@@ -1,7 +1,7 @@
 """快速抓取：粘贴文本解析、临时验证、一键入库。"""
 import re
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from .. import crypto, db, services
@@ -45,7 +45,9 @@ def parse(payload: TextIn, _=Depends(require_data_key)):
     urls = list(dict.fromkeys(m.group(0).rstrip(".,;，。；") for m in URL_RE.finditer(payload.text)))
     keys = list(dict.fromkeys(m.group(0) for m in KEY_RE.finditer(payload.text)))
     if not keys:
-        keys = [m.group(0) for m in TOKEN_RE.finditer(payload.text) if _looks_like_key(m.group(0))]
+        keys = list(dict.fromkeys(
+            m.group(0) for m in TOKEN_RE.finditer(payload.text) if _looks_like_key(m.group(0))
+        ))
     guessed_type = registry.guess_channel_type(urls[0]) if urls else "gateway"
     return {
         "base_url": urls[0] if urls else "",
@@ -70,8 +72,10 @@ def save(payload: SaveIn, request: Request):
     data_key = require_data_key(request)
     base_url = payload.base_url.strip()
     key_value = payload.key.strip()
-    if not base_url.startswith("http"):
-        raise ValueError("base_url")
+    if not base_url.startswith(("http://", "https://")):
+        raise HTTPException(400, "Base URL 必须以 http:// 或 https:// 开头")
+    if not key_value:
+        raise HTTPException(400, "Key 不能为空")
     channel_type = registry.guess_channel_type(base_url)
     from urllib.parse import urlparse
 

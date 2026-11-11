@@ -38,14 +38,18 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== "GET" || url.pathname.startsWith("/api")) return;
+  // network-first：本地服务在线时永远拿最新代码，离线时回退缓存
   event.respondWith(
-    caches.match(event.request).then((hit) =>
-      hit ||
-      fetch(event.request).then((resp) => {
-        const copy = resp.clone();
-        caches.open(CACHE).then((cache) => cache.put(event.request, copy));
+    fetch(event.request)
+      .then((resp) => {
+        if (resp && resp.ok) {
+          const copy = resp.clone();
+          caches.open(CACHE).then((cache) => cache.put(event.request, copy));
+        }
         return resp;
       })
-    )
+      .catch(() =>
+        caches.match(event.request).then((hit) => hit || Response.error())
+      )
   );
 });

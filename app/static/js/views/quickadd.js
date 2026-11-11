@@ -47,6 +47,7 @@ export const QuickAddView = {
     form: { name: "", type: "gateway", base_url: "", key: "" },
     channelTypes: [],
     verifyResult: null,
+    parseTimer: null,
   }),
   computed: {
     hostHint() {
@@ -60,18 +61,25 @@ export const QuickAddView = {
     this.channelTypes = r.channel_types;
   },
   watch: {
-    async raw(text) {
+    raw(text) {
+      clearTimeout(this.parseTimer);
       if (!text.trim()) { this.parsed = null; return; }
-      const r = await api.post("/api/quickadd/parse", { text });
-      this.parsed = r;
-      this.form.base_url = r.base_url;
-      this.form.key = r.key;
-      this.form.type = r.guessed_type;
-      this.form.name = this.hostHint;
-      this.verifyResult = null;
+      this.parseTimer = setTimeout(() => this.doParse(text), 400);
     },
   },
   methods: {
+    async doParse(text) {
+      try {
+        const r = await api.post("/api/quickadd/parse", { text });
+        if (text !== this.raw) return; // 已被更新的输入取代
+        this.parsed = r;
+        this.form.base_url = r.base_url;
+        this.form.key = r.key;
+        this.form.type = r.guessed_type;
+        this.form.name = this.hostHint;
+        this.verifyResult = null;
+      } catch (e) { this.$toast(e.message, "err"); }
+    },
     async verify() {
       this.verifyResult = null;
       try {

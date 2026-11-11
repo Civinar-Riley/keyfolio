@@ -10,7 +10,10 @@ async function request(method, path, body) {
   let data = null;
   try { data = await resp.json(); } catch { data = {}; }
   if (resp.status === 401) {
-    window.dispatchEvent(new CustomEvent("kf:unauthorized"));
+    // 登录/解锁类接口的 401 是"密码错误"，不是会话失效
+    if (!path.startsWith("/api/auth/")) {
+      window.dispatchEvent(new CustomEvent("kf:unauthorized"));
+    }
     throw new Error(data.detail || "未登录");
   }
   if (!resp.ok) {

@@ -81,7 +81,9 @@ def change_password(payload: ChangePasswordIn, request: Request):
 @router.post("/recovery-reset")
 def recovery_reset(payload: RecoveryResetIn, response: Response):
     new_code = auth.recovery_reset(payload.recovery_code, payload.new_password)
-    _set_session_cookie(response, auth.create_session())
+    # reset 会清空会话与内存密钥；用新密码重新登录，给出可用会话
+    token = auth.login(payload.new_password)
+    _set_session_cookie(response, token)
     return {"ok": True, "recovery_code": new_code}
 
 

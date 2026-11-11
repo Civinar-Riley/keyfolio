@@ -6,9 +6,15 @@ def _headers(key: str) -> dict:
     return {"x-goog-api-key": key}
 
 
+def _beta_url(base_url: str, suffix: str) -> str:
+    base = normalize_base(base_url)
+    if base.lower().endswith("/v1beta"):
+        return base + suffix
+    return base + "/v1beta" + suffix
+
+
 async def fetch_models(base_url: str, key: str) -> list[str]:
-    data = await get_json(
-        normalize_base(base_url) + "/v1beta/models", key, headers=_headers(key))
+    data = await get_json(_beta_url(base_url, "/models"), key, headers=_headers(key))
     items = data.get("models") if isinstance(data, dict) else data
     if not isinstance(items, list):
         items = []
@@ -21,7 +27,7 @@ async def fetch_models(base_url: str, key: str) -> list[str]:
 
 
 async def chat_test(base_url: str, key: str, model: str) -> str:
-    url = normalize_base(base_url) + f"/v1beta/models/{model}:generateContent"
+    url = _beta_url(base_url, f"/models/{model}:generateContent")
     payload = {
         "contents": [{"parts": [{"text": "ping"}]}],
         "generationConfig": {"maxOutputTokens": 1},

@@ -174,6 +174,7 @@ def _import_overwrite(data: dict, data_key: bytes, backup_data_key) -> bool:
 
 def _import_merge(data: dict, data_key: bytes, backup_data_key) -> dict:
     stats = {"channels": 0, "keys": 0, "models": 0, "templates": 0}
+    inserted_key_map: dict[int, int] = {}  # 备份里的 key.id → 新 key.id
     with db.get_conn() as conn:
         existing_channels = {
             (r["base_url"].lower(), r["name"]): r["id"]
@@ -182,9 +183,9 @@ def _import_merge(data: dict, data_key: bytes, backup_data_key) -> dict:
         for row in data["channels"]:
             match = existing_channels.get((row["base_url"].lower(), row["name"]))
             if match is None:
-                sql, params = _insert_sql(conn, "channels", row)
-                cur = conn.execute(sql, params)
-                channel_id = cur.lastrowid
+                item = _without_id(row)
+                sql, params = _insert_sql(conn, "channels", item)
+                channel_id = conn.execute(sql, params).lastrowid
                 stats["channels"] += 1
             else:
                 channel_id = match
@@ -197,10 +198,11 @@ def _import_merge(data: dict, data_key: bytes, backup_data_key) -> dict:
                 ).fetchone()
                 if exists:
                     continue
-                item = {**key_row, "channel_id": channel_id}
+                item = _without_id({**key_row, "channel_id": channel_id})
                 item["value_enc"] = _prepare_key_value(key_row, data_key, backup_data_key)
                 sql, params = _insert_sql(conn, "keys", item)
-                conn.execute(sql, params)
+                new_key_id = conn.execute(sql, params).lastrowid
+                inserted_key_map[key_row["id"]] = new_key_id
                 stats["keys"] += 1
             for model_row in data.get("models", []):
                 if model_row.get("channel_id") != row["id"]:
@@ -211,26 +213,38 @@ def _import_merge(data: dict, data_key: bytes, backup_data_key) -> dict:
                 ).fetchone()
                 if exists:
                     continue
-                item = {**model_row, "channel_id": channel_id}
+                item = _without_id({**model_row, "channel_id": channel_id})
                 sql, params = _insert_sql(conn, "models", item)
                 conn.execute(sql, params)
                 stats["models"] += 1
+        # 只给本次新插入的 Key 带回余额历史
+        for record in data.get("balance_records", []):
+            new_key_id = inserted_key_map.get(record.get("key_id"))
+            if new_key_id is None:
+                continue
+            item = _without_id({**record, "key_id": new_key_id})
+            sql, params = _insert_sql(conn, "balance_records", item)
+            conn.execute(sql, params)
         for tpl in data.get("templates", []):
             exists = conn.execute(
                 "SELECT 1 FROM templates WHERE name=?", (tpl["name"],)
             ).fetchone()
             if not exists:
-                sql, params = _insert_sql(conn, "templates", tpl)
+                sql, params = _insert_sql(conn, "templates", _without_id(tpl))
                 conn.execute(sql, params)
                 stats["templates"] += 1
     return stats
+
+
+def _without_id(row: dict) -> dict:
+    return {k: v for k, v in row.items() if k != "id"}
 
 
 def _prepare_key_value(row: dict, data_key: bytes, backup_data_key) -> str:
     if row.get("value_encrypted"):
         if backup_data_key is None:
             raise HTTPException(
-                400, "备份里的 Key 是密文，需要提供导出时的密码才能合并导入")
+                400, "备份里的 Key 是密文，需要提供导出时设置的密码才能导入")
         return crypto.field_encrypt(
             data_key, crypto.field_decrypt(backup_data_key, row["value_enc"]))
     return crypto.field_encrypt(data_key, row.get("value", ""))
