@@ -24,3 +24,6 @@ Thumbs.db
 
 # 会话本地文件
 .zcode/
+
+# PyInstaller 生成物
+*.spec
