@@ -37,6 +37,7 @@ class ChannelIn(BaseModel):
     console_url: str = ""
     grp: str = ""
     notes: str = ""
+    enabled: bool = True
 
 
 class ChannelPatch(BaseModel):
@@ -138,9 +139,10 @@ def create_channel(payload: ChannelIn, request: Request, _=Depends(require_data_
     with db.get_conn() as conn:
         cur = conn.execute(
             "INSERT INTO channels(name, type, base_url, console_url, grp, notes, enabled, created_at) "
-            "VALUES(?,?,?,?,?,?,1,?)",
+            "VALUES(?,?,?,?,?,?,?,?)",
             (name, payload.type, base_url,
-             payload.console_url.strip(), payload.grp.strip(), payload.notes, db.now()),
+             payload.console_url.strip(), payload.grp.strip(), payload.notes,
+             1 if payload.enabled else 0, db.now()),
         )
         channel_id = cur.lastrowid
     return {"ok": True, "id": channel_id}
@@ -199,13 +201,16 @@ def create_key(channel_id: int, payload: KeyIn, request: Request):
 @router.put("/keys/{key_id}")
 def update_key(key_id: int, payload: KeyPatch, request: Request):
     data_key = require_data_key(request)
-    if services.get_key(key_id) is None:
+    key_row = services.get_key(key_id)
+    if key_row is None:
         raise HTTPException(404, "Key 不存在")
+    value = payload.value.strip() if payload.value is not None else ""
     with db.get_conn() as conn:
-        if payload.value is not None and payload.value.strip():
+        if value and value != services.key_plaintext(key_row):
             conn.execute(
-                "UPDATE keys SET value_enc=? WHERE id=?",
-                (crypto.field_encrypt(data_key, payload.value.strip()), key_id),
+                "UPDATE keys SET value_enc=?, balance=NULL, balance_updated_at='', "
+                "last_check='', last_check_msg='' WHERE id=?",
+                (crypto.field_encrypt(data_key, value), key_id),
             )
         fields = {
             k: v for k, v in payload.model_dump().items()

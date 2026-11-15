@@ -49,10 +49,12 @@ def _channel(channel_id: int):
 
 
 def _pick_key(channel_id: int, key_id: int | None):
-    if key_id:
+    if key_id is not None:
         row = services.get_key(key_id)
         if row is None:
             raise HTTPException(404, "Key 不存在")
+        if row["channel_id"] != channel_id:
+            raise HTTPException(400, "Key 不属于该渠道")
         return row
     row = services.first_enabled_key(channel_id)
     if row is None:
@@ -153,26 +155,19 @@ def parse_model_text(text: str) -> list[str]:
     try:
         data = json.loads(text)
     except ValueError:
-        data = None
-    if isinstance(data, list):
-        for item in data:
+        return list(dict.fromkeys(line.strip() for line in text.splitlines() if line.strip()))
+    items = data
+    if isinstance(data, dict):
+        items = data.get("data") or data.get("models") or data.get("ids")
+    if isinstance(items, list):
+        for item in items:
             if isinstance(item, str):
                 ids.append(item)
-            elif isinstance(item, dict) and item.get("id"):
-                ids.append(str(item["id"]))
-    elif isinstance(data, dict):
-        items = data.get("data") or data.get("models") or data.get("ids")
-        if isinstance(items, list):
-            for item in items:
-                if isinstance(item, str):
-                    ids.append(item)
-                elif isinstance(item, dict):
-                    name = item.get("id") or item.get("name") or item.get("model")
-                    if name:
-                        ids.append(str(name))
-    if not ids:
-        ids = [line.strip() for line in text.splitlines() if line.strip()]
-    return list(dict.fromkeys(ids))
+            elif isinstance(item, dict):
+                name = item.get("id") or item.get("name") or item.get("model")
+                if name:
+                    ids.append(str(name))
+    return list(dict.fromkeys(name.strip() for name in ids if name.strip()))
 
 
 @router.put("/models/{model_id}")

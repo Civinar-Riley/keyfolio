@@ -12,9 +12,9 @@ import qrcode
 import qrcode.image.svg
 from fastapi import HTTPException, Request
 
-from . import crypto, db
+from . import crypto, db, paths
 
-SESSION_COOKIE = "kf_session"
+SESSION_COOKIE = f"kf_session_{paths.PORT}"
 LOCK_THRESHOLD = 5
 LOCK_SECONDS = 300
 SESSION_TTL = 7 * 24 * 3600  # 闲置 7 天后会话失效
@@ -83,24 +83,32 @@ def status(request: Request | None = None) -> dict[str, Any]:
 
 
 def _verify_password(password: str) -> bool:
-    kdf = db.get_setting(K_PW_KDF)
-    pw_hash = db.get_setting(K_PW_HASH)
+    with db.get_conn() as conn:
+        conn.execute("BEGIN")
+        kdf = db.get_setting(K_PW_KDF, conn=conn)
+        pw_hash = db.get_setting(K_PW_HASH, conn=conn)
     if not kdf or not pw_hash:
         return False
     return crypto.password_matches(password, kdf, pw_hash)
 
 
 def _register_fail() -> None:
-    count = int(db.get_setting(K_FAIL_COUNT, 0) or 0) + 1
-    db.set_setting(K_FAIL_COUNT, count)
-    if count >= LOCK_THRESHOLD:
-        db.set_setting(K_LOCK_UNTIL, int(time.time()) + LOCK_SECONDS)
-        db.set_setting(K_FAIL_COUNT, 0)
+    with db.get_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        count = int(db.get_setting(K_FAIL_COUNT, 0, conn=conn) or 0) + 1
+        if count >= LOCK_THRESHOLD:
+            db.set_setting(K_LOCK_UNTIL, int(time.time()) + LOCK_SECONDS, conn=conn)
+            count = 0
+        db.set_setting(K_FAIL_COUNT, count, conn=conn)
 
 
-def _clear_fail() -> None:
-    db.set_setting(K_FAIL_COUNT, 0)
-    db.set_setting(K_LOCK_UNTIL, 0)
+def _clear_fail(*, conn=None) -> None:
+    if conn is None:
+        with db.get_conn() as conn:
+            _clear_fail(conn=conn)
+        return
+    db.set_setting(K_FAIL_COUNT, 0, conn=conn)
+    db.set_setting(K_LOCK_UNTIL, 0, conn=conn)
 
 
 def create_session() -> str:
@@ -177,12 +185,19 @@ def setup(password: str) -> dict[str, str]:
     recovery_code = crypto.generate_recovery_code()
     normalized = crypto.normalize_recovery(recovery_code)
 
-    db.set_setting(K_PW_KDF, kdf)
-    db.set_setting(K_PW_HASH, crypto.hash_password(password, kdf))
-    db.set_setting(K_WRAP_PW, crypto.wrap_data_key(data_key, password, crypto.AAD_WRAP_PW))
-    db.set_setting(K_WRAP_RC, crypto.wrap_data_key(data_key, normalized, crypto.AAD_WRAP_RC))
-    db.set_setting(K_RC_HASH, crypto.hash_code(normalized))
-    _clear_fail()
+    pw_hash = crypto.hash_password(password, kdf)
+    wrap_pw = crypto.wrap_data_key(data_key, password, crypto.AAD_WRAP_PW)
+    wrap_rc = crypto.wrap_data_key(data_key, normalized, crypto.AAD_WRAP_RC)
+    with db.get_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if db.get_setting(K_PW_HASH, conn=conn) is not None:
+            raise _http(409, "已初始化，不能重复设置")
+        db.set_setting(K_PW_KDF, kdf, conn=conn)
+        db.set_setting(K_PW_HASH, pw_hash, conn=conn)
+        db.set_setting(K_WRAP_PW, wrap_pw, conn=conn)
+        db.set_setting(K_WRAP_RC, wrap_rc, conn=conn)
+        db.set_setting(K_RC_HASH, crypto.hash_code(normalized), conn=conn)
+        _clear_fail(conn=conn)
 
     State.data_key = data_key
     seed_templates()
@@ -264,10 +279,13 @@ def change_password(token: str, old: str, new: str) -> None:
         raise _http(400, "新密码至少 8 位")
     if State.data_key is None:
         raise _http(401, "需要重新登录")
-    db.set_setting(K_WRAP_PW, crypto.wrap_data_key(State.data_key, new, crypto.AAD_WRAP_PW))
+    wrap_pw = crypto.wrap_data_key(State.data_key, new, crypto.AAD_WRAP_PW)
     kdf = crypto.make_kdf_params()
-    db.set_setting(K_PW_KDF, kdf)
-    db.set_setting(K_PW_HASH, crypto.hash_password(new, kdf))
+    pw_hash = crypto.hash_password(new, kdf)
+    with db.get_conn() as conn:
+        db.set_setting(K_WRAP_PW, wrap_pw, conn=conn)
+        db.set_setting(K_PW_KDF, kdf, conn=conn)
+        db.set_setting(K_PW_HASH, pw_hash, conn=conn)
     # 改密码后其他设备的会话一并失效，只保留当前会话
     for other in list(State.sessions):
         if other != token:
@@ -292,18 +310,22 @@ def recovery_reset(recovery_code: str, new_password: str) -> str:
 
     new_code = crypto.generate_recovery_code()
     new_normalized = crypto.normalize_recovery(new_code)
-    db.set_setting(K_WRAP_PW, crypto.wrap_data_key(data_key, new_password, crypto.AAD_WRAP_PW))
-    db.set_setting(K_WRAP_RC, crypto.wrap_data_key(data_key, new_normalized, crypto.AAD_WRAP_RC))
-    db.set_setting(K_RC_HASH, crypto.hash_code(new_normalized))
+    wrap_pw = crypto.wrap_data_key(data_key, new_password, crypto.AAD_WRAP_PW)
+    wrap_rc = crypto.wrap_data_key(data_key, new_normalized, crypto.AAD_WRAP_RC)
     kdf = crypto.make_kdf_params()
-    db.set_setting(K_PW_KDF, kdf)
-    db.set_setting(K_PW_HASH, crypto.hash_password(new_password, kdf))
-    # 恢复码是最后逃生通道：重置后清掉 TOTP，避免验证器丢了也进不来
-    db.delete_setting(K_TOTP_SECRET)
-    db.delete_setting(K_TOTP_ENABLED)
-    db.delete_setting(K_BACKUP_CODES)
-    db.delete_setting(K_TOTP_PENDING)
-    _clear_fail()
+    pw_hash = crypto.hash_password(new_password, kdf)
+    with db.get_conn() as conn:
+        db.set_setting(K_WRAP_PW, wrap_pw, conn=conn)
+        db.set_setting(K_WRAP_RC, wrap_rc, conn=conn)
+        db.set_setting(K_RC_HASH, crypto.hash_code(new_normalized), conn=conn)
+        db.set_setting(K_PW_KDF, kdf, conn=conn)
+        db.set_setting(K_PW_HASH, pw_hash, conn=conn)
+        # 恢复码是最后逃生通道：重置后清掉 TOTP，避免验证器丢了也进不来
+        db.delete_setting(K_TOTP_SECRET, conn=conn)
+        db.delete_setting(K_TOTP_ENABLED, conn=conn)
+        db.delete_setting(K_BACKUP_CODES, conn=conn)
+        db.delete_setting(K_TOTP_PENDING, conn=conn)
+        _clear_fail(conn=conn)
     drop_all_sessions()
     return new_code
 
@@ -334,10 +356,11 @@ def totp_enable(token: str, code: str) -> dict[str, list[str]]:
         raise _http(400, "请先获取二维码")
     if not pyotp.TOTP(pending).verify(code.strip(), valid_window=1):
         raise _http(401, "验证码错误，请重试")
-    db.set_setting(K_TOTP_SECRET, crypto.field_encrypt(State.data_key, pending))
-    db.set_setting(K_TOTP_ENABLED, True)
-    db.delete_setting(K_TOTP_PENDING)
-    codes = _gen_backup_codes()
+    with db.get_conn() as conn:
+        db.set_setting(K_TOTP_SECRET, crypto.field_encrypt(State.data_key, pending), conn=conn)
+        db.set_setting(K_TOTP_ENABLED, True, conn=conn)
+        db.delete_setting(K_TOTP_PENDING, conn=conn)
+        codes = _gen_backup_codes(conn=conn)
     return {"backup_codes": codes}
 
 
@@ -345,9 +368,10 @@ def totp_disable(token: str, password: str) -> None:
     _require_unlocked(token)
     if not _verify_password(password):
         raise _http(401, "主密码错误")
-    db.delete_setting(K_TOTP_SECRET)
-    db.delete_setting(K_TOTP_ENABLED)
-    db.delete_setting(K_BACKUP_CODES)
+    with db.get_conn() as conn:
+        db.delete_setting(K_TOTP_SECRET, conn=conn)
+        db.delete_setting(K_TOTP_ENABLED, conn=conn)
+        db.delete_setting(K_BACKUP_CODES, conn=conn)
 
 
 def backup_codes_regenerate(token: str, password: str) -> list[str]:
@@ -357,18 +381,22 @@ def backup_codes_regenerate(token: str, password: str) -> list[str]:
     return _gen_backup_codes()
 
 
-def _gen_backup_codes() -> list[str]:
+def _gen_backup_codes(*, conn=None) -> list[str]:
     codes = [crypto.generate_backup_code() for _ in range(10)]
-    db.set_setting(K_BACKUP_CODES, [crypto.hash_code(c) for c in codes])
+    db.set_setting(K_BACKUP_CODES, [crypto.hash_code(c) for c in codes], conn=conn)
     return codes
 
 
-def export_auth_state() -> dict[str, Any]:
-    """备份用：认证相关 settings 原样带走（敏感字段仍是密文）。"""
+def export_auth_state(*, conn=None) -> dict[str, Any]:
+    """备份用：认证字段与业务表共享一个读取快照。"""
+    if conn is None:
+        with db.get_conn() as conn:
+            conn.execute("BEGIN")
+            return export_auth_state(conn=conn)
     out = {}
     for key in (K_PW_HASH, K_PW_KDF, K_WRAP_PW, K_WRAP_RC, K_RC_HASH,
                 K_TOTP_SECRET, K_TOTP_ENABLED, K_BACKUP_CODES):
-        value = db.get_setting(key)
+        value = db.get_setting(key, conn=conn)
         if value is not None:
             out[key] = value
     return out
@@ -380,10 +408,14 @@ AUTH_KEYS = (
 )
 
 
-def restore_auth_state(block: dict[str, Any]) -> None:
-    """整块替换认证状态：先清干净，避免备份没有的开关（如 TOTP）残留当前值。"""
+def restore_auth_state(block: dict[str, Any], *, conn=None) -> None:
+    """整块替换认证状态，与覆盖导入的数据一起提交或回滚。"""
+    if conn is None:
+        with db.get_conn() as conn:
+            restore_auth_state(block, conn=conn)
+        return
     for key in AUTH_KEYS:
-        db.delete_setting(key)
+        db.delete_setting(key, conn=conn)
     for key, value in block.items():
         if key in AUTH_KEYS:
-            db.set_setting(key, value)
+            db.set_setting(key, value, conn=conn)

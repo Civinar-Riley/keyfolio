@@ -32,7 +32,7 @@ CANDIDATE_PATHS = [
 NUMERIC_FIELDS = (
     "total_balance", "totalBalance", "available_balance", "availableBalance",
     "balance", "remaining_balance", "total_available_amount", "credits",
-    "total_credits", "credit", "grants_available",
+    "credit", "grants_available",
 )
 
 MAX_CONCURRENCY = 8
@@ -56,7 +56,16 @@ async def probe_balance(base_url: str, key: str) -> dict:
                 if exc.status in (401, 403):
                     saw_auth_error = True
                 return None
-            balance, currency = first_number(data, NUMERIC_FIELDS)
+            inner = data.get("data") if isinstance(data, dict) else None
+            if url.endswith("/credits") and isinstance(inner, dict) and "total_credits" in inner:
+                # OpenRouter 的累计购买额度需扣除已用量，不能直接当作余额。
+                try:
+                    balance = float(inner["total_credits"]) - float(inner["total_usage"])
+                except (KeyError, TypeError, ValueError):
+                    return None
+                currency = inner.get("currency") or "USD"
+            else:
+                balance, currency = first_number(data, NUMERIC_FIELDS)
             if balance is None:
                 return None
             return {

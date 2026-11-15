@@ -1,5 +1,6 @@
 """导出模板 CRUD 与渲染。"""
 import json
+import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -15,6 +16,34 @@ PLACEHOLDERS = [
     "{base_url}", "{api_base}", "{key}",
     "{model}", "{models}", "{models_json}",
 ]
+_PLACEHOLDER_RE = re.compile("|".join(re.escape(p) for p in PLACEHOLDERS))
+_JSON_TOKEN_RE = re.compile(r'"(?:\\.|[^"\\])*"|' + _PLACEHOLDER_RE.pattern)
+
+
+def _render_text(template: str, values: dict[str, str]) -> str:
+    if not template.lstrip().startswith(("{", "[")) or template.strip() in values:
+        return _PLACEHOLDER_RE.sub(lambda match: values[match[0]], template)
+    # 用空值识别 JSON 模板，保留字符串外的 {models_json} 数组占位符。
+    probe = _JSON_TOKEN_RE.sub(
+        lambda match: _PLACEHOLDER_RE.sub("", match[0]) if match[0].startswith('"') else "null",
+        template,
+    )
+    try:
+        json.loads(probe)
+    except ValueError:
+        return _PLACEHOLDER_RE.sub(lambda match: values[match[0]], template)
+
+    def replace(match):
+        token = match[0]
+        if token.startswith('"'):
+            return _PLACEHOLDER_RE.sub(
+                lambda item: json.dumps(values[item[0]], ensure_ascii=False)[1:-1], token
+            )
+        if token == "{models_json}":
+            return values[token]
+        return json.dumps(values[token], ensure_ascii=False)
+
+    return _JSON_TOKEN_RE.sub(replace, template)
 
 
 class TemplateIn(BaseModel):
@@ -95,9 +124,8 @@ def render_template(payload: RenderIn, _=Depends(require_data_key)):
         ).fetchall()
     model_ids = [r["model_id"] for r in model_rows]
 
-    rendered = tpl["json_template"]
     base_api = api_base(channel["base_url"], "v1beta" if channel["type"] == "gemini" else "v1")
-    for placeholder, value in {
+    rendered = _render_text(tpl["json_template"], {
         "{channel_name}": channel["name"],
         "{key_name}": key_row["name"],
         "{base_url}": channel["base_url"],
@@ -107,8 +135,7 @@ def render_template(payload: RenderIn, _=Depends(require_data_key)):
         "{models_json}": json.dumps(model_ids, ensure_ascii=False, indent=2),
         "{channel_type}": channel["type"],
         "{model}": model_ids[0] if model_ids else "",
-    }.items():
-        rendered = rendered.replace(placeholder, value)
+    })
 
     parsed = None
     try:

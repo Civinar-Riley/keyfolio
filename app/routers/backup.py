@@ -37,6 +37,7 @@ def export_backup(payload: ExportIn, request: Request):
         raise HTTPException(400, "备份加密密码至少 8 位")
 
     with db.get_conn() as conn:
+        conn.execute("BEGIN")
         data = {
             "channels": [dict(r) for r in conn.execute("SELECT * FROM channels ORDER BY id").fetchall()],
             "keys": _export_keys(conn, data_key, encrypt=bool(payload.password)),
@@ -44,9 +45,10 @@ def export_backup(payload: ExportIn, request: Request):
             "balance_records": [dict(r) for r in conn.execute("SELECT * FROM balance_records ORDER BY id").fetchall()],
             "templates": [dict(r) for r in conn.execute("SELECT * FROM templates ORDER BY id").fetchall()],
         }
+        if payload.password:
+            data["auth"] = auth.export_auth_state(conn=conn)
 
     if payload.password:
-        data["auth"] = auth.export_auth_state()
         # 额外用导出密码包一层 data key：合并导入时用它解字段密文，
         # 不要求用户提供主密码
         data["backup_wrap"] = crypto.wrap_data_key(
@@ -173,9 +175,9 @@ def _import_overwrite(data: dict, data_key: bytes, backup_data_key) -> bool:
             for row in data.get(table, []):
                 sql, params = _insert_sql(conn, table, row)
                 conn.execute(sql, params)
+        if restore_auth:
+            auth.restore_auth_state(auth_block, conn=conn)
     if restore_auth:
-        # 在连接关闭后再恢复认证块，避免同线程嵌套写连接锁库
-        auth.restore_auth_state(auth_block)
         auth.drop_all_sessions()
         return True
     return False
@@ -190,25 +192,29 @@ def _import_merge(data: dict, data_key: bytes, backup_data_key) -> dict:
             for r in conn.execute("SELECT id, name, base_url FROM channels").fetchall()
         }
         for row in data["channels"]:
-            match = existing_channels.get((row["base_url"].lower(), row["name"]))
+            channel_match = (row["base_url"].lower(), row["name"])
+            match = existing_channels.get(channel_match)
             if match is None:
                 item = _without_id(row)
                 sql, params = _insert_sql(conn, "channels", item)
                 channel_id = conn.execute(sql, params).lastrowid
+                existing_channels[channel_match] = channel_id
                 stats["channels"] += 1
             else:
                 channel_id = match
             for key_row in data["keys"]:
                 if key_row.get("channel_id") != row["id"]:
                     continue
-                exists = conn.execute(
-                    "SELECT 1 FROM keys WHERE channel_id=? AND name=?",
+                value = _key_value(key_row, backup_data_key)
+                same_name = conn.execute(
+                    "SELECT value_enc FROM keys WHERE channel_id=? AND name=?",
                     (channel_id, key_row["name"]),
-                ).fetchone()
-                if exists:
+                ).fetchall()
+                if any(crypto.field_decrypt(data_key, existing["value_enc"]) == value
+                       for existing in same_name):
                     continue
                 item = _without_id({**key_row, "channel_id": channel_id})
-                item["value_enc"] = _prepare_key_value(key_row, data_key, backup_data_key)
+                item["value_enc"] = crypto.field_encrypt(data_key, value)
                 sql, params = _insert_sql(conn, "keys", item)
                 new_key_id = conn.execute(sql, params).lastrowid
                 inserted_key_map[key_row["id"]] = new_key_id
@@ -249,14 +255,17 @@ def _without_id(row: dict) -> dict:
     return {k: v for k, v in row.items() if k != "id"}
 
 
-def _prepare_key_value(row: dict, data_key: bytes, backup_data_key) -> str:
+def _key_value(row: dict, backup_data_key) -> str:
     if row.get("value_encrypted"):
         if backup_data_key is None:
             raise HTTPException(
                 400, "备份里的 Key 是密文，需要提供导出时设置的密码才能导入")
-        return crypto.field_encrypt(
-            data_key, crypto.field_decrypt(backup_data_key, row["value_enc"]))
-    return crypto.field_encrypt(data_key, row.get("value", ""))
+        return crypto.field_decrypt(backup_data_key, row["value_enc"])
+    return row.get("value", "")
+
+
+def _prepare_key_value(row: dict, data_key: bytes, backup_data_key) -> str:
+    return crypto.field_encrypt(data_key, _key_value(row, backup_data_key))
 
 
 def _table_cols(conn, table: str) -> set[str]:
