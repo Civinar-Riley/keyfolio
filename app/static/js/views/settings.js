@@ -95,7 +95,7 @@ export const SettingsView = {
 
     <section class="sheet">
       <header class="sheet-head">
-        <div><h2>备份与恢复</h2><p>全量导出渠道、Key、模型、余额历史、模板与登录凭证。</p></div>
+        <div><h2>备份与恢复</h2><p>全量导出渠道、Key、模型、余额历史、模板与定时任务设置；只有加密备份包含登录凭证。</p></div>
       </header>
       <div class="sheet-body">
         <div class="btn-row">
@@ -114,14 +114,18 @@ export const SettingsView = {
           <p class="hint">文件：{{ importFile.name }}（{{ importFile.size }} bytes，{{ importData?.encrypted ? "加密备份" : "明文备份" }}）</p>
           <label class="field">导入方式
             <select v-model="importMode">
-              <option value="merge">合并（按 URL + Key 名去重，保留现有数据）</option>
-              <option value="overwrite">覆盖（清空后恢复为备份内容，含登录凭证）</option>
+              <option value="merge">合并（保留现有数据，跳过重复 Key）</option>
+              <option value="overwrite">覆盖（清空后恢复为备份内容）</option>
             </select>
           </label>
           <label class="field" v-if="importData?.encrypted">备份密码 <input type="password" v-model="importPw"></label>
           <button class="btn danger" :disabled="importBusy || (importMode==='overwrite' && !confirmOverwrite)" @click="doImport">
             <k-icon name="download"></k-icon>{{ importMode === "overwrite" ? "确认覆盖导入" : "开始合并导入" }}
           </button>
+          <label class="field" v-if="canRestoreSettings" style="display:flex; align-items:flex-start; gap:8px; margin-top:10px">
+            <input type="checkbox" v-model="restoreSettings" style="width:auto; margin-top:3px">
+            <span>恢复定时任务设置<small class="hint" style="display:block; margin-top:3px">启用后会按备份计划访问已配置渠道。</small></span>
+          </label>
           <label class="field" v-if="importMode==='overwrite'" style="display:flex; align-items:center; gap:8px; margin-top:10px">
             <input type="checkbox" v-model="confirmOverwrite" style="width:auto; margin:0">
             我知道覆盖导入会清空当前全部数据
@@ -148,10 +152,13 @@ export const SettingsView = {
     op: "", opPw: "",
     sched: { enabled: false, balance_interval_hours: 12, model_interval_hours: 24 },
     encOpen: false, encPw: "",
-    importFile: null, importData: null, importMode: "merge", importPw: "", confirmOverwrite: false,
+    importFile: null, importData: null, importMode: "merge", importPw: "", confirmOverwrite: false, restoreSettings: false,
     fileSeq: 0, importBusy: false,
     busy: false,
   }),
+  computed: {
+    canRestoreSettings() { return !!(this.importData?.encrypted || this.importData?.data?.settings); },
+  },
   async created() { await this.load(); },
   methods: {
     ts(v) { return v ? new Date(v * 1000).toLocaleString() : "从未"; },
@@ -241,7 +248,7 @@ export const SettingsView = {
       const seq = ++this.fileSeq;
       const file = ev.target.files[0];
       this.importFile = null; this.importData = null;
-      this.confirmOverwrite = false; this.importPw = "";
+      this.confirmOverwrite = false; this.importPw = ""; this.restoreSettings = false;
       if (!file) return;
       try {
         const data = JSON.parse(await file.text());
@@ -263,20 +270,22 @@ export const SettingsView = {
       try {
         const r = await api.post("/api/backup/import", {
           backup: this.importData, mode: this.importMode, password: this.importPw,
+          restore_settings: this.restoreSettings,
         });
+        const restored = r.settings_restored ? "，定时任务设置已恢复" : "";
         if (r.relogin) {
-          this.$toast("覆盖导入完成，需要重新登录", "ok");
+          this.$toast(`覆盖导入完成${restored}，需要重新登录`, "ok");
           window.dispatchEvent(new CustomEvent("kf:unauthorized"));
         } else if (r.mode === "overwrite") {
-          this.$toast("覆盖导入完成", "ok");
-          await this.load();
+          this.$toast(`覆盖导入完成${restored}`, "ok");
         } else {
-          this.$toast(`合并完成：渠道 +${r.channels}，Key +${r.keys}，模型 +${r.models}`, "ok");
+          this.$toast(`合并完成：渠道 +${r.channels}，Key +${r.keys}，模型 +${r.models}${restored}`, "ok");
         }
         if (fileSeq === this.fileSeq) {
           this.importFile = null; this.importData = null;
-          this.confirmOverwrite = false; this.importPw = "";
+          this.confirmOverwrite = false; this.importPw = ""; this.restoreSettings = false;
         }
+        if (!r.relogin) await this.load();
       } catch (e) { this.$toast(e.message, "err"); }
       finally { this.importBusy = false; }
     },

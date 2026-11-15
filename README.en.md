@@ -23,7 +23,7 @@ Keyfolio collects all of that into one local FastAPI + SQLite service. No accoun
 
 ### Credentials & channels
 
-- A channel holds multiple keys, with create / edit / delete in one place; key values are masked by default and support expiry dates, groups, notes, and enable/disable
+- A channel holds multiple keys, with create / edit / delete in one place; key values are masked by default and support expiry dates, groups, notes, balance accounts, and enable/disable
 - Provider presets for OpenAI / Claude / Gemini / DeepSeek / SiliconFlow / OpenRouter / Moonshot / Zhipu fill in base URL and console link
 - Saving the same base URL again appends a key instead of creating a duplicate channel
 
@@ -33,6 +33,7 @@ Keyfolio collects all of that into one local FastAPI + SQLite service. No accoun
 - Pull the remote model list, review added / removed / revived entries, then apply the sync; removed models are disabled rather than deleted, and manual disables are preserved
 - Balance adapters for DeepSeek / SiliconFlow / OpenRouter and others, with generic read-only probing as a fallback, explicit failure reasons, and manual entry; every check is recorded to history
 - Scheduled balance checks and model syncs, configurable per interval; existing expiry dates and currencies are kept when the provider omits them
+- Keys sharing an account can use the same balance-account name; the dashboard counts the latest balance once per channel, account, and currency. Leave it blank to count a key independently
 
 ### Dashboard & export
 
@@ -46,6 +47,7 @@ Keyfolio collects all of that into one local FastAPI + SQLite service. No accoun
 - Field-level AES-GCM encryption for key values and TOTP secrets; the data key is wrapped separately by the master password (scrypt) and the recovery code
 - Server-side screen lock: data APIs return 423 while locked, surviving a refresh or a new tab; sessions expire after 7 days idle, and changing the password signs out other devices
 - Full `.json` backups, optionally encrypted; imports support overwrite or merge-and-dedup, and encrypted backups restore login credentials and key ciphertext across installations
+- Backups include balance-account labels and scheduler settings. Restoring the schedule is optional and off by default; older backups remain supported
 
 ## Interface
 
@@ -141,10 +143,14 @@ python scripts/e2e_native.py  # end-to-end test (starts its own fake platform on
 python scripts/test_regressions.py  # channel, model parsing, and template regressions
 python scripts/test_backup_regressions.py  # authentication and backup regressions
 python scripts/test_adapters_scheduler.py  # adapter and scheduler regressions
+python scripts/test_backup_optimizations.py  # backup settings and import performance regressions
+python scripts/test_optimizations.py  # balance accounts, metadata, and history regressions
 node scripts/test_frontend.mjs  # frontend state and async interaction regressions
 ```
 
 The frontend has no build step: edit files under `app/static/` and refresh the browser. Vue and Chart.js are vendored; npm is not required.
+
+GitHub Actions runs all tests on pull requests and pushes to `main`, covering Windows / Ubuntu and Python 3.11 / 3.14, with Node.js 22 for frontend tests. Each test script runs independently with temporary databases and mock platforms.
 
 Windows packaging:
 

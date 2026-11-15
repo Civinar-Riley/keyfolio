@@ -101,7 +101,7 @@ export const QuickAddView = {
     keyCandidates() { return this.parsed ? this.parsed.key_candidates : []; },
   },
   async created() {
-    const r = await api.get("/api/channels");
+    const r = await api.get("/api/metadata");
     this.channelTypes = r.channel_types;
   },
   beforeUnmount() {

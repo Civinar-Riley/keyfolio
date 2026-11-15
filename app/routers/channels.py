@@ -55,6 +55,7 @@ class KeyIn(BaseModel):
     value: str
     notes: str = ""
     expires_at: str = ""
+    balance_account: str = ""
     enabled: bool = True
 
 
@@ -63,6 +64,7 @@ class KeyPatch(BaseModel):
     value: str | None = None
     notes: str | None = None
     expires_at: str | None = None
+    balance_account: str | None = None
     enabled: bool | None = None
 
 
@@ -95,6 +97,15 @@ def _key_dict(row) -> dict:
         # 密文与当前 data key 不匹配（如导入了别的库的备份）时不拖垮整页
         data["value_masked"] = "****"
     return data
+
+
+@router.get("/metadata")
+def metadata(_=Depends(require_data_key)):
+    return {
+        "channel_types": registry.CHANNEL_TYPES,
+        "providers": registry.PROVIDERS,
+        "model_types": registry.MODEL_TYPES,
+    }
 
 
 @router.get("/channels")
@@ -188,11 +199,12 @@ def create_key(channel_id: int, payload: KeyIn, request: Request):
         raise HTTPException(400, "Key 值不能为空")
     with db.get_conn() as conn:
         cur = conn.execute(
-            "INSERT INTO keys(channel_id, name, value_enc, notes, expires_at, enabled, created_at) "
-            "VALUES(?,?,?,?,?,?,?)",
+            "INSERT INTO keys(channel_id, name, value_enc, notes, expires_at, balance_account, enabled, created_at) "
+            "VALUES(?,?,?,?,?,?,?,?)",
             (channel_id, payload.name.strip() or "Key",
              crypto.field_encrypt(data_key, value), payload.notes,
-             payload.expires_at.strip(), 1 if payload.enabled else 0, db.now()),
+             payload.expires_at.strip(), payload.balance_account.strip(),
+             1 if payload.enabled else 0, db.now()),
         )
         key_id = cur.lastrowid
     return {"ok": True, "id": key_id}
@@ -218,6 +230,8 @@ def update_key(key_id: int, payload: KeyPatch, request: Request):
         }
         if "expires_at" in fields:
             fields["expires_at"] = str(fields["expires_at"]).strip()
+        if "balance_account" in fields:
+            fields["balance_account"] = fields["balance_account"].strip()
         if fields:
             sets = ", ".join(f"{name}=?" for name in fields)
             conn.execute(f"UPDATE keys SET {sets} WHERE id=?", (*fields.values(), key_id))
