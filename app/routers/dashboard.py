@@ -1,7 +1,10 @@
 """统一看板：全渠道/Key 聚合 + 余额趋势。"""
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, Query
 
 from .. import db
+from ..adapters import registry
 from .channels import require_data_key
 
 router = APIRouter(prefix="/api", tags=["dashboard"])
@@ -19,6 +22,8 @@ def dashboard(_=Depends(require_data_key)):
             ).fetchall()
         }
     balance_by_currency: dict[str, float] = {}
+    balance_sources = {}
+    account_counts: dict[tuple[int, str], int] = {}
     keys_total = 0
     keys_active = 0
     latest_update = ""
@@ -26,12 +31,19 @@ def dashboard(_=Depends(require_data_key)):
         keys_total += 1
         if key["enabled"]:
             keys_active += 1
+        account = key["balance_account"]
+        if account:
+            account_id = (key["channel_id"], account)
+            account_counts[account_id] = account_counts.get(account_id, 0) + 1
         if key["balance"] is not None and key["currency"]:
-            balance_by_currency[key["currency"]] = (
-                balance_by_currency.get(key["currency"], 0.0) + key["balance"]
-            )
+            source = ("account", key["channel_id"], account, key["currency"]) if account else ("key", key["id"])
+            previous = balance_sources.get(source)
+            if previous is None or (key["balance_updated_at"], key["id"]) > (previous["balance_updated_at"], previous["id"]):
+                balance_sources[source] = key
         if key["balance_updated_at"] > latest_update:
             latest_update = key["balance_updated_at"]
+    for key in balance_sources.values():
+        balance_by_currency[key["currency"]] = balance_by_currency.get(key["currency"], 0.0) + key["balance"]
 
     keys_by_channel: dict[int, list] = {}
     for key in keys:
@@ -45,8 +57,10 @@ def dashboard(_=Depends(require_data_key)):
             "keys_active": keys_active,
             "channels_total": len(channels),
             "balance_by_currency": {k: round(v, 4) for k, v in balance_by_currency.items()},
+            "shared_balance_accounts": sum(count > 1 for count in account_counts.values()),
             "latest_update": latest_update,
         },
+        "channel_types": registry.CHANNEL_TYPES,
         "channels": [
             {
                 **dict(channel),
@@ -70,15 +84,13 @@ def trend(
         ).fetchone()
         if key_row is None:
             return {"ok": False, "error": "Key 不存在"}
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
         rows = conn.execute(
             "SELECT balance, currency, recorded_at FROM balance_records "
-            "WHERE key_id=? ORDER BY recorded_at ASC, id ASC",
-            (key_id,),
+            "WHERE key_id=? AND recorded_at>=? ORDER BY recorded_at ASC, id ASC",
+            (key_id, cutoff),
         ).fetchall()
-    from datetime import datetime, timedelta, timezone
-
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    records = [dict(r) for r in rows if r["recorded_at"] >= cutoff]
+    records = [dict(r) for r in rows]
     return {
         "ok": True,
         "key": dict(key_row),

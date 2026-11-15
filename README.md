@@ -23,7 +23,7 @@ Keyfolio 用一个本地 FastAPI 服务加 SQLite 把这些收进一个界面。
 
 ### 凭证与渠道
 
-- 渠道挂多个 Key，统一增删改查；Key 值打码显示，支持到期日、分组、备注与启停
+- 渠道挂多个 Key，统一增删改查；Key 值打码显示，支持到期日、分组、备注、余额账户与启停
 - 新建渠道可从 OpenAI / Claude / Gemini / DeepSeek / SiliconFlow / OpenRouter / Moonshot / 智谱等预设带出 Base URL 与控制台地址
 - 同一 Base URL 再次抓取入库会追加 Key，不会重复建渠道
 
@@ -33,6 +33,7 @@ Keyfolio 用一个本地 FastAPI 服务加 SQLite 把这些收进一个界面。
 - 拉取远端模型列表，对比新增 / 消失 / 重新出现后确认同步；消失的模型默认停用不删，手动停用的不会被自动启用
 - 余额按渠道类型适配（DeepSeek / SiliconFlow / OpenRouter 等），失败走通用只读探测，再不行给出具体原因并支持手动填写；每次查询记入历史
 - 定时任务可按间隔自动查余额、同步模型；自动查询未返回到期日或币种时，保留已填写的信息
+- 同一账户的多把 Key 可填写相同「余额账户」；看板在同一渠道、同一币种内只计最新余额，留空则各 Key 独立计算
 
 ### 看板与导出
 
@@ -46,6 +47,7 @@ Keyfolio 用一个本地 FastAPI 服务加 SQLite 把这些收进一个界面。
 - Key 值与 TOTP 密钥字段级 AES-GCM 加密；data key 由主密码（scrypt）和恢复码分别包裹
 - 服务端锁屏：锁屏期间数据接口返回 423，刷新或换标签页仍保持锁定；会话闲置 7 天失效，改密码踢出其他设备
 - 全量备份导出为 `.json`，可整包加密；导入支持覆盖或合并去重，加密备份可跨实例恢复登录凭证与 Key 密文
+- 备份包含余额账户与定时任务设置；导入时可勾选「恢复定时任务设置」，默认保留本机计划，旧备份仍可使用
 
 ## 界面
 
@@ -141,10 +143,14 @@ python scripts/e2e_native.py  # 端到端测试（自行启动 39001 端口的�
 python scripts/test_regressions.py  # 渠道、模型解析与模板导出回归
 python scripts/test_backup_regressions.py  # 认证与备份回归
 python scripts/test_adapters_scheduler.py  # 平台适配与定时任务回归
+python scripts/test_backup_optimizations.py  # 备份设置恢复与导入性能回归
+python scripts/test_optimizations.py  # 余额账户、元数据与历史查询回归
 node scripts/test_frontend.mjs  # 前端状态与异步交互回归
 ```
 
 前端没有构建步骤：改 `app/static/` 里的文件，刷新浏览器即可。Vue 与 Chart.js 已 vendored，不需要 npm。
+
+GitHub Actions 在每个 PR 和 `main` 推送时运行全部测试，覆盖 Windows / Ubuntu、Python 3.11 / 3.14，前端测试使用 Node.js 22。各测试独立运行，使用临时数据库与假平台。
 
 Windows 打包：
 

@@ -1,4 +1,6 @@
 """应用设置：定时任务配置等。"""
+import math
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
@@ -29,10 +31,23 @@ def get_settings(_=Depends(require_data_key)):
     }
 
 
+def validate_scheduler(enabled, balance_hours, models_hours) -> None:
+    if not isinstance(enabled, bool):
+        raise HTTPException(400, "定时任务开关必须是布尔值")
+    for hours in (balance_hours, models_hours):
+        if isinstance(hours, bool) or not isinstance(hours, (int, float)):
+            raise HTTPException(400, "间隔必须是有限的非负数")
+        try:
+            finite = math.isfinite(hours)
+        except OverflowError:
+            finite = False
+        if not finite or hours < 0:
+            raise HTTPException(400, "间隔必须是有限的非负数")
+
+
 @router.put("/scheduler")
 def set_scheduler(payload: SchedulerIn, _=Depends(require_data_key)):
-    if payload.balance_interval_hours < 0 or payload.model_interval_hours < 0:
-        raise HTTPException(400, "间隔不能为负数")
+    validate_scheduler(payload.enabled, payload.balance_interval_hours, payload.model_interval_hours)
     db.set_setting("sched_enabled", payload.enabled)
     db.set_setting("sched_balance_hours", payload.balance_interval_hours)
     db.set_setting("sched_models_hours", payload.model_interval_hours)

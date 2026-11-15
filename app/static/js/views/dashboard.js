@@ -13,6 +13,7 @@ export const DashboardView = {
           </div>
         </div>
         <div class="folio-amounts" v-else><span class="none">—</span></div>
+        <p class="hint" v-if="summary.shared_balance_accounts > 0" style="margin:12px 0 0">共享账户按最新余额计一次</p>
       </div>
       <dl class="folio-meta">
         <div>
@@ -63,7 +64,11 @@ export const DashboardView = {
               @keydown.enter="openTrend(r.key)" @keydown.space.prevent="openTrend(r.key)">
             <td>
               <div class="row-name">{{ r.channel.name }}</div>
-              <div class="row-sub"><span class="tag">{{ r.key.name }}</span>{{ r.channel.grp || "未分组" }}</div>
+              <div class="row-sub">
+                <span class="tag">{{ r.key.name }}</span>
+                <span class="tag" v-if="r.key.balance_account">余额账户：{{ r.key.balance_account }}</span>
+                {{ r.channel.grp || "未分组" }}
+              </div>
             </td>
             <td class="num">
               <div class="row-balance">{{ fmtAmount(r.key.balance) }}<small v-if="r.key.currency">{{ r.key.currency }}</small></div>
@@ -167,8 +172,7 @@ export const DashboardView = {
       const r = await api.get("/api/dashboard");
       this.summary = r.summary;
       this.channels = r.channels;
-      const t = await api.get("/api/channels");
-      this.channelTypes = t.channel_types;
+      this.channelTypes = r.channel_types;
     },
     async openTrend(k) {
       this.trendKeyId = k.id;

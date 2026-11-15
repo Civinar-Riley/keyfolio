@@ -7,7 +7,7 @@ from pathlib import Path
 _conn: sqlite3.Connection | None = None
 _db_path: str = ""
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # 迁移脚本按序执行：MIGRATIONS[i] 把库从版本 i 升到 i+1
 MIGRATIONS = {
@@ -72,6 +72,9 @@ MIGRATIONS = {
     ALTER TABLE models ADD COLUMN auto_disabled INTEGER NOT NULL DEFAULT 0;
     CREATE INDEX IF NOT EXISTS idx_models_channel ON models(channel_id);
     CREATE INDEX IF NOT EXISTS idx_balance_key_time ON balance_records(key_id, recorded_at);
+    """,
+    3: """
+    ALTER TABLE keys ADD COLUMN balance_account TEXT NOT NULL DEFAULT '';
     """,
 }
 

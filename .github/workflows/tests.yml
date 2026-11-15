@@ -1,0 +1,63 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: ${{ matrix.os }} / Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ['3.11', '3.14']
+    env:
+      PYTHONUTF8: '1'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Python regressions
+        run: python scripts/test_regressions.py
+
+      - name: Backup regressions
+        run: python scripts/test_backup_regressions.py
+
+      - name: Adapter and scheduler regressions
+        run: python scripts/test_adapters_scheduler.py
+
+      - name: Backup optimizations
+        run: python scripts/test_backup_optimizations.py
+
+      - name: Optimizations
+        run: python scripts/test_optimizations.py
+
+      - name: Frontend regressions
+        run: node scripts/test_frontend.mjs
+
+      - name: Native end-to-end tests
+        run: python scripts/e2e_native.py

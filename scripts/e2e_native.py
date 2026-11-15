@@ -440,7 +440,7 @@ n_keys = conn.execute("SELECT COUNT(*) FROM keys").fetchone()[0]
 n_records = conn.execute("SELECT COUNT(*) FROM balance_records").fetchone()[0]
 schema_version = conn.execute("SELECT value FROM settings WHERE key='schema_version'").fetchone()[0]
 ok(n_channels == 1 and n_keys == 1 and n_records == 0, "最终数据与备份一致（SQLite 文件直读）")
-ok(json.loads(schema_version) == 2, "schema 迁移到 v2")
+ok(json.loads(schema_version) == 3, "schema 迁移到 v3")
 conn.close()
 
 print(f"\n全部通过：{PASS} 项断言")

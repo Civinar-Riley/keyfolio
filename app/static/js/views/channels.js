@@ -10,9 +10,14 @@ export const ChannelsView = {
       <!-- 左列：渠道索引 -->
       <aside class="index-col" v-if="!isMobile || !detailOpen">
         <div class="index-tools">
-          <button class="btn primary block" @click="openChannelForm(null)">
-            <k-icon name="plus"></k-icon>新渠道
-          </button>
+          <div class="btn-row">
+            <button class="btn primary" style="flex:1" @click="openChannelForm(null)">
+              <k-icon name="plus"></k-icon>新渠道
+            </button>
+            <button class="btn sm" @click="load()" title="刷新渠道和当前模型">
+              <k-icon name="refresh"></k-icon>刷新
+            </button>
+          </div>
           <div class="search-box">
             <k-icon name="search"></k-icon>
             <input v-model="filter" placeholder="搜索名称 / URL / 分组" aria-label="搜索渠道">
@@ -85,6 +90,7 @@ export const ChannelsView = {
                 <div class="key-info">
                   <div class="key-name">
                     {{ k.name }}
+                    <span class="badge" v-if="k.balance_account">余额账户：{{ k.balance_account }}</span>
                     <span class="badge" v-if="!k.enabled">停用</span>
                     <span class="badge" :class="expiryOf(k).cls" v-if="expiryOf(k)">{{ expiryOf(k).text }}</span>
                     <span class="badge dot" :class="k.last_check==='ok' ? 'ok' : (k.last_check==='fail' ? 'fail' : '')"
@@ -225,6 +231,10 @@ export const ChannelsView = {
           <label class="field span-2">名称 <input v-model="keyForm.name" placeholder="如 主 Key"></label>
           <label class="field span-2">Key 值
             <textarea v-model="keyForm.value" :placeholder="keyForm.id ? '留空则不修改' : 'sk-...'" style="min-height:70px"></textarea>
+          </label>
+          <label class="field span-2">余额账户（可选）
+            <input v-model="keyForm.balance_account" placeholder="如 主账户">
+            <span class="hint">同渠道相同账户名共享余额，留空则各 Key 独立。</span>
           </label>
           <label class="field">到期日（可选） <input v-model="keyForm.expires_at" placeholder="如 2026-12-31"></label>
           <label class="field">备注 <input v-model="keyForm.notes"></label>
@@ -403,7 +413,7 @@ export const ChannelsView = {
       this.detailOpen = true;
       this.revealed = {};
       this.modelQuery = "";
-      await this.load();
+      if (this.detail) await this.loadModels(id);
     },
     async loadModels(cid) {
       const seq = ++this.modelLoadSeq;
@@ -454,15 +464,15 @@ export const ChannelsView = {
     },
     openKeyForm(k) {
       this.keyForm = k
-        ? { id: k.id, name: k.name, value: "", notes: k.notes, expires_at: k.expires_at || "", enabled: !!k.enabled }
-        : { name: "Key " + (this.detail.keys.length + 1), value: "", notes: "", expires_at: "", enabled: true };
+        ? { id: k.id, name: k.name, value: "", balance_account: k.balance_account || "", notes: k.notes, expires_at: k.expires_at || "", enabled: !!k.enabled }
+        : { name: "Key " + (this.detail.keys.length + 1), value: "", balance_account: "", notes: "", expires_at: "", enabled: true };
     },
     async saveKey() {
       const f = this.keyForm;
       try {
         if (f.id) {
           await api.put(`/api/keys/${f.id}`, {
-            name: f.name, notes: f.notes, expires_at: f.expires_at, enabled: f.enabled,
+            name: f.name, balance_account: f.balance_account, notes: f.notes, expires_at: f.expires_at, enabled: f.enabled,
             ...(f.value ? { value: f.value } : {}),
           });
         } else {
