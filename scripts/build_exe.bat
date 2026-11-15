@@ -1,5 +1,7 @@
 @echo off
-REM Keyfolio Windows exe 打包：onefile，静态资源打进包，数据落 exe 同目录 data\
+REM Keyfolio Windows exe build: onefile, static assets bundled, data lands in data\ next to the exe.
+REM (Keep this file ASCII-only: cmd re-seeks batch files by decoded character offsets, which
+REM misaligns for non-ASCII text when the console codepage differs from the file encoding.)
 cd /d "%~dp0.."
 python -m PyInstaller ^
   --onefile ^
@@ -12,4 +14,4 @@ python -m PyInstaller ^
   --clean ^
   main.py
 echo.
-echo 产物： dist\keyfolio.exe
+echo Output: dist\keyfolio.exe
