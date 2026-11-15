@@ -123,9 +123,11 @@ def get_conn():
         conn.close()
 
 
-def get_setting(key: str, default=None):
-    with get_conn() as conn:
-        row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+def get_setting(key: str, default=None, *, conn: sqlite3.Connection | None = None):
+    if conn is None:
+        with get_conn() as conn:
+            return get_setting(key, default, conn=conn)
+    row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
     if row is None:
         return default
     try:
@@ -134,14 +136,20 @@ def get_setting(key: str, default=None):
         return row[0]
 
 
-def set_setting(key: str, value) -> None:
-    with get_conn() as conn:
-        _set_meta(conn, key, value)
+def set_setting(key: str, value, *, conn: sqlite3.Connection | None = None) -> None:
+    if conn is None:
+        with get_conn() as conn:
+            set_setting(key, value, conn=conn)
+        return
+    _set_meta(conn, key, value)
 
 
-def delete_setting(key: str) -> None:
-    with get_conn() as conn:
-        conn.execute("DELETE FROM settings WHERE key=?", (key,))
+def delete_setting(key: str, *, conn: sqlite3.Connection | None = None) -> None:
+    if conn is None:
+        with get_conn() as conn:
+            delete_setting(key, conn=conn)
+        return
+    conn.execute("DELETE FROM settings WHERE key=?", (key,))
 
 
 def now() -> str:

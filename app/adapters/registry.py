@@ -173,7 +173,6 @@ _TYPE_HINTS = [
     ("veo", "video"),
     ("video", "video"),
     ("music", "music"),
-    ("udio", "music"),
     ("suno", "music"),
     ("vision", "vision"),
     ("-vl", "vision"),
@@ -182,6 +181,10 @@ _TYPE_HINTS = [
 
 def classify_model(model_id: str) -> str:
     s = model_id.lower()
+    if re.search(r"(?:^|[/_-])udio(?:$|[/_-])", s):
+        return "music"
+    if "rerank" not in s and re.search(r"(?:^|/)(?:bge-|(?:multilingual-)?e5-)", s):
+        return "embedding"
     for hint, mtype in _TYPE_HINTS:
         if hint in s:
             return mtype

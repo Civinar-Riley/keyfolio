@@ -112,6 +112,7 @@ export const DashboardView = {
     summary: {}, channels: [], channelTypes: [],
     fGroup: "", fType: "", sortBy: "balance_desc",
     trend: null, trendKeyId: null, trendDays: 90, chart: null,
+    trendSeq: 0, disposed: false,
   }),
   computed: {
     groups() {
@@ -137,6 +138,10 @@ export const DashboardView = {
     },
   },
   async created() { await this.load(); },
+  beforeUnmount() {
+    this.disposed = true;
+    this.closeTrend();
+  },
   methods: {
     fmtTime,
     fmtAmount(v) {
@@ -170,39 +175,52 @@ export const DashboardView = {
       await this.loadTrend();
     },
     async loadTrend() {
-      if (!this.trendKeyId) return;
-      const r = await api.get(`/api/dashboard/trend?key_id=${this.trendKeyId}&days=${this.trendDays}`);
-      if (!r.ok) { this.$toast(r.error, "err"); return; }
-      this.trend = r;
-      this.$nextTick(() => this.drawChart());
+      const keyId = this.trendKeyId;
+      const days = this.trendDays;
+      const seq = ++this.trendSeq;
+      if (!keyId) return;
+      try {
+        const r = await api.get(`/api/dashboard/trend?key_id=${keyId}&days=${days}`);
+        if (this.disposed || seq !== this.trendSeq || keyId !== this.trendKeyId || days !== this.trendDays) return;
+        if (!r.ok) { this.$toast(r.error, "err"); return; }
+        this.trend = r;
+        this.$nextTick(() => {
+          if (!this.disposed && seq === this.trendSeq) this.drawChart();
+        });
+      } catch (e) {
+        if (!this.disposed && seq === this.trendSeq) this.$toast(e.message, "err");
+      }
     },
     drawChart() {
+      if (this.chart) { this.chart.destroy(); this.chart = null; }
       const el = document.getElementById("trend-chart");
-      if (!el || !window.Chart || !this.trend.records.length) return;
-      const labels = this.trend.records.map(r => fmtTime(r.recorded_at));
-      const data = this.trend.records.map(r => r.balance);
-      if (this.chart) this.chart.destroy();
+      if (!el || !window.Chart || !this.trend?.records.length) return;
+      const records = this.trend.records;
+      const labels = records.map(r => fmtTime(r.recorded_at));
+      const currencies = [...new Set(records.map(r => r.currency || ""))];
+      const colors = ["#c7a15b", "#5b9e8a", "#849ecb"];
       this.chart = new window.Chart(el, {
         type: "line",
         data: {
           labels,
-          datasets: [{
-            label: `${this.trend.key.name} 余额（${this.trend.key.currency}）`,
-            data, tension: 0.32, fill: true,
-            borderColor: "#c7a15b", backgroundColor: "rgba(199,161,91,.10)",
+          datasets: currencies.map((currency, i) => ({
+            label: currency || "未标币种",
+            data: records.map(r => (r.currency || "") === currency ? r.balance : null),
+            tension: 0.32, fill: false,
+            borderColor: colors[i % colors.length],
             pointRadius: 2.5, pointHoverRadius: 4, pointBackgroundColor: "#0b110d",
-            pointBorderColor: "#c7a15b", borderWidth: 2,
-          }],
+            pointBorderColor: colors[i % colors.length], borderWidth: 2,
+          })),
         },
         options: {
           responsive: true, maintainAspectRatio: false,
           interaction: { mode: "index", intersect: false },
           plugins: {
-            legend: { display: false },
+            legend: { display: currencies.length > 1 },
             tooltip: {
               backgroundColor: "#111a14", borderColor: "#28352b", borderWidth: 1,
               titleColor: "#eae4d5", bodyColor: "#9ba79c", padding: 10, displayColors: false,
-              callbacks: { label: (c) => `${this.fmtAmount(c.parsed.y)} ${this.trend.key.currency}` },
+              callbacks: { label: (c) => `${this.fmtAmount(c.parsed.y)} ${c.dataset.label}` },
             },
           },
           scales: {
@@ -219,6 +237,7 @@ export const DashboardView = {
       });
     },
     closeTrend() {
+      this.trendSeq++;
       if (this.chart) { this.chart.destroy(); this.chart = null; }
       this.trend = null;
       this.trendKeyId = null;

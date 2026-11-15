@@ -32,12 +32,12 @@ Keyfolio collects all of that into one local FastAPI + SQLite service. No accoun
 - Verify a key with `GET /v1/models` (free), or send a real `max_tokens=1` request; reasoning models automatically switch to `max_completion_tokens`
 - Pull the remote model list, review added / removed / revived entries, then apply the sync; removed models are disabled rather than deleted, and manual disables are preserved
 - Balance adapters for DeepSeek / SiliconFlow / OpenRouter and others, with generic read-only probing as a fallback, explicit failure reasons, and manual entry; every check is recorded to history
-- Scheduled balance checks and model syncs, configurable per interval; automatic checks never overwrite manually entered expiry dates or currencies
+- Scheduled balance checks and model syncs, configurable per interval; existing expiry dates and currencies are kept when the provider omits them
 
 ### Dashboard & export
 
 - One page for every key's balance, status, and expiry, with group / type filters and balance / updated-time sorting; click a row for a 7 / 30 / 90 / 365-day balance trend
-- Placeholder templates (`{name}`, `{base_url}`, `{api_base}`, `{key}`, `{model}`, `{models}`, …) with built-ins for SillyTavern / ZCode / dsh / .env / cURL / OpenAI SDK / generic JSON; templates are editable
+- Placeholder templates (`{channel_name}`, `{base_url}`, `{api_base}`, `{key}`, `{model}`, `{models}`, …) with built-ins for SillyTavern / ZCode / dsh / .env / cURL / OpenAI SDK / generic JSON; templates are editable
 - `{api_base}` appends a version segment only when missing, so base URLs with or without `/v1` never double up
 
 ### Security & backup
@@ -138,6 +138,10 @@ docker-compose.yml
 pip install -r requirements.txt
 python main.py                 # dev server
 python scripts/e2e_native.py  # end-to-end test (starts its own fake platform on port 39001)
+python scripts/test_regressions.py  # channel, model parsing, and template regressions
+python scripts/test_backup_regressions.py  # authentication and backup regressions
+python scripts/test_adapters_scheduler.py  # adapter and scheduler regressions
+node scripts/test_frontend.mjs  # frontend state and async interaction regressions
 ```
 
 The frontend has no build step: edit files under `app/static/` and refresh the browser. Vue and Chart.js are vendored; npm is not required.

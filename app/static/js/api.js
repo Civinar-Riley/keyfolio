@@ -11,7 +11,15 @@ async function request(method, path, body) {
   try { data = await resp.json(); } catch { data = {}; }
   if (resp.status === 401) {
     // 登录/解锁类接口的 401 是"密码错误"，不是会话失效
-    if (!path.startsWith("/api/auth/")) {
+    if (path === "/api/auth/unlock") {
+      // 解锁也可能因为服务重启/会话过期失败，不能一直困在锁屏页。
+      try {
+        const status = await fetch("/api/auth/status");
+        if (status.ok && !(await status.json()).authenticated) {
+          window.dispatchEvent(new CustomEvent("kf:unauthorized"));
+        }
+      } catch {}
+    } else if (!path.startsWith("/api/auth/")) {
       window.dispatchEvent(new CustomEvent("kf:unauthorized"));
     }
     throw new Error(data.detail || "未登录");
@@ -63,8 +71,9 @@ export function expiryInfo(value) {
   const text = String(value).trim();
   const date = new Date(text.length === 10 ? text + "T23:59:59" : text);
   if (Number.isNaN(date.getTime())) return { text, cls: "" };
-  const days = Math.ceil((date.getTime() - Date.now()) / 86400000);
-  if (days < 0) return { text: `已过期 ${text}`, cls: "fail" };
+  const remaining = date.getTime() - Date.now();
+  const days = Math.ceil(remaining / 86400000);
+  if (remaining < 0) return { text: `已过期 ${text}`, cls: "fail" };
   if (days <= 7) return { text: `${days} 天后到期`, cls: "warn" };
   return { text: `到期 ${text}`, cls: "" };
 }

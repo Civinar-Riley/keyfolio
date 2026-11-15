@@ -104,7 +104,7 @@ export const ChannelsView = {
                 </div>
               </div>
               <div class="key-actions">
-                <button class="btn sm ok" @click="copyConfig(k.id)"><k-icon name="copy"></k-icon>复制配置</button>
+                <button class="btn sm ok" @click="copyConfig(k)"><k-icon name="copy"></k-icon>复制配置</button>
                 <button class="btn sm" @click="verifyKey(k.id, 'models')"><k-icon name="refresh"></k-icon>测 Key</button>
                 <button class="btn sm" @click="chatTest(k.id)">测对话</button>
                 <button class="btn sm" @click="checkBalance(k.id)">查余额</button>
@@ -342,6 +342,8 @@ export const ChannelsView = {
     pasteOpen: false, pasteText: "", pasteIds: [],
     modelFormOpen: false, newModelId: "", modelQuery: "",
     diff: null, diffChecked: [], revivedChecked: [], removedAction: "disable",
+    loadSeq: 0, modelLoadSeq: 0, selectionSeq: 0, diffSeq: 0,
+    mediaQuery: null, mediaChange: null, disposed: false,
   }),
   computed: {
     filtered() {
@@ -359,9 +361,15 @@ export const ChannelsView = {
     enabledModels() { return this.models.filter(m => m.enabled).map(m => m.model_id); },
   },
   async created() {
-    window.matchMedia("(max-width: 767px)").addEventListener("change", e => { this.isMobile = e.matches; });
+    this.mediaQuery = window.matchMedia("(max-width: 767px)");
+    this.mediaChange = e => { this.isMobile = e.matches; };
+    this.mediaQuery.addEventListener("change", this.mediaChange);
     await this.load();
-    if (!this.isMobile && this.channels.length && !this.selectedId) this.select(this.channels[0].id);
+    if (!this.disposed && !this.isMobile && this.channels.length && !this.selectedId) this.select(this.channels[0].id);
+  },
+  beforeUnmount() {
+    this.disposed = true;
+    this.mediaQuery?.removeEventListener("change", this.mediaChange);
   },
   methods: {
     fmtBalance, fmtTime,
@@ -371,7 +379,9 @@ export const ChannelsView = {
     },
     expiryOf(k) { return expiryInfo(k.expires_at); },
     async load() {
+      const seq = ++this.loadSeq;
       const r = await api.get("/api/channels");
+      if (this.disposed || seq !== this.loadSeq) return;
       this.channels = r.channels;
       this.channelTypes = r.channel_types;
       this.providers = r.providers || [];
@@ -379,18 +389,33 @@ export const ChannelsView = {
       if (this.selectedId) {
         this.detail = this.channels.find(c => c.id === this.selectedId) || null;
         if (this.detail) await this.loadModels(this.selectedId);
+        else this.models = [];
       }
     },
     async select(id) {
       this.selectedId = id;
+      this.selectionSeq++;
+      this.diffSeq++;
+      this.modelLoadSeq++;
+      this.detail = this.channels.find(c => c.id === id) || null;
+      this.models = [];
+      this.diff = null;
       this.detailOpen = true;
       this.revealed = {};
       this.modelQuery = "";
       await this.load();
     },
     async loadModels(cid) {
+      const seq = ++this.modelLoadSeq;
+      const selection = this.selectionSeq;
       const r = await api.get(`/api/channels/${cid}/models`);
+      if (this.disposed || cid !== this.selectedId || selection !== this.selectionSeq || seq !== this.modelLoadSeq) return;
       this.models = r.models;
+      const channel = this.channels.find(c => c.id === cid);
+      if (channel) {
+        channel.models_count = r.models.length;
+        channel.models_enabled = r.models.filter(m => m.enabled).length;
+      }
     },
     openChannelForm(c) {
       this.preset = "";
@@ -443,7 +468,8 @@ export const ChannelsView = {
         } else {
           await api.post(`/api/channels/${this.selectedId}/keys`, f);
         }
-        this.keyForm = null;
+        if (f.id) delete this.revealed[f.id];
+        if (this.keyForm === f) this.keyForm = null;
         await this.load();
         this.$toast("Key 已保存", "ok");
       } catch (e) { this.$toast(e.message, "err"); }
@@ -456,18 +482,21 @@ export const ChannelsView = {
     },
     async toggleReveal(k) {
       if (this.revealed[k.id]) { delete this.revealed[k.id]; this.revealed = { ...this.revealed }; return; }
+      const selection = this.selectionSeq;
       try {
         const r = await api.post(`/api/keys/${k.id}/reveal`);
+        if (this.disposed || selection !== this.selectionSeq) return;
         this.revealed = { ...this.revealed, [k.id]: r.value };
       } catch (e) { this.$toast(e.message, "err"); }
     },
     async copyConfig(k) {
+      const channel = this.detail;
+      const models = this.enabledModels.join(", ");
       try {
         const r = await api.post(`/api/keys/${k.id}/reveal`);
-        const models = this.enabledModels.join(", ");
         const text = [
-          `# ${this.detail.name} · ${k.name}`,
-          `Base URL: ${this.detail.base_url}`,
+          `# ${channel.name} · ${k.name}`,
+          `Base URL: ${channel.base_url}`,
           `API Key: ${r.value}`,
           models ? `Models: ${models}` : "",
         ].filter(Boolean).join("\n");
@@ -476,14 +505,22 @@ export const ChannelsView = {
       } catch (e) { this.$toast(e.message, "err"); }
     },
     async verifyKey(keyId, mode, model) {
+      const cid = this.selectedId;
+      const selection = this.selectionSeq;
+      const seq = mode === "models" ? ++this.diffSeq : this.diffSeq;
+      if (mode === "models") this.diff = null;
       try {
         const r = await api.post(`/api/keys/${keyId}/verify`, { mode, model: model || "" });
+        if (this.disposed || cid !== this.selectedId || selection !== this.selectionSeq || (mode === "models" && seq !== this.diffSeq)) return;
         if (r.ok) {
           this.$toast(mode === "chat" ? r.message : `Key 可用，远端 ${r.models.length} 个模型`, "ok");
           if (mode === "models") {
+            await this.loadModels(cid);
+            if (this.disposed || cid !== this.selectedId || selection !== this.selectionSeq || seq !== this.diffSeq) return;
             const remote = r.models;
             const localAll = new Set(this.models.map(m => m.model_id));
             this.diff = {
+              channel_id: cid,
               remote_count: remote.length,
               added: remote.filter(id => !localAll.has(id)),
               removed: this.models.filter(m => m.enabled && !remote.includes(m.model_id)).map(m => m.model_id),
@@ -519,8 +556,12 @@ export const ChannelsView = {
       }
     },
     async chatTest(keyId) {
-      const model = this.enabledModels[0];
-      if (!model) { this.$toast("请先添加并启用一个模型", "err"); return; }
+      const candidates = this.models.filter(m => m.enabled && ["chat", "vision"].includes(m.mtype)).map(m => m.model_id);
+      if (!candidates.length) { this.$toast("请先添加并启用一个对话模型", "err"); return; }
+      const choice = prompt("选择对话测试模型（会发送一条真实请求）：\n" + candidates.join("\n"), candidates[0]);
+      if (choice === null) return;
+      const model = choice.trim();
+      if (!candidates.includes(model)) { this.$toast("请选择一个已启用的对话模型", "err"); return; }
       await this.verifyKey(keyId, "chat", model);
     },
     async checkBalance(keyId) {
@@ -569,25 +610,32 @@ export const ChannelsView = {
       } catch (e) { this.$toast(e.message, "err"); }
     },
     async fetchModels() {
+      const cid = this.selectedId;
+      const selection = this.selectionSeq;
+      const seq = ++this.diffSeq;
+      this.diff = null;
       try {
-        const r = await api.post(`/api/channels/${this.selectedId}/models/diff`, {});
+        const r = await api.post(`/api/channels/${cid}/models/diff`, {});
+        if (this.disposed || cid !== this.selectedId || selection !== this.selectionSeq || seq !== this.diffSeq) return;
         if (!r.ok) { this.$toast(r.error, "err"); return; }
-        this.diff = r;
+        this.diff = { ...r, channel_id: cid };
         this.diffChecked = [...r.added];
         this.revivedChecked = [...(r.revived || [])];
         this.removedAction = "disable";
       } catch (e) { this.$toast(e.message, "err"); }
     },
     async applySync() {
+      const diff = this.diff;
+      if (!diff || diff.channel_id !== this.selectedId) return;
       try {
-        const r = await api.post(`/api/channels/${this.selectedId}/models/sync`, {
-          added: this.diffChecked,
-          removed: this.diff.removed,
-          revived: this.revivedChecked,
+        const r = await api.post(`/api/channels/${diff.channel_id}/models/sync`, {
+          added: [...this.diffChecked],
+          removed: diff.removed,
+          revived: [...this.revivedChecked],
           removed_action: this.removedAction,
         });
-        this.diff = null;
-        await Promise.all([this.load(), this.loadModels(this.selectedId)]);
+        if (this.diff === diff) this.diff = null;
+        await this.load();
         this.$toast(`同步完成：新增 ${r.added}，恢复 ${r.revived || 0}，移除 ${r.removed}`, "ok");
       } catch (e) { this.$toast(e.message, "err"); }
     },
@@ -626,9 +674,11 @@ export const ChannelsView = {
 
 function parseModelText(text) {
   text = text.trim();
+  if (!text) return [];
   const ids = [];
-  let data = null;
-  try { data = JSON.parse(text); } catch {}
+  let data;
+  try { data = JSON.parse(text); }
+  catch { return [...new Set(text.split(/\r?\n/).map(s => s.trim()).filter(Boolean))]; }
   if (Array.isArray(data)) {
     for (const item of data) {
       if (typeof item === "string") ids.push(item);
@@ -643,8 +693,5 @@ function parseModelText(text) {
       }
     }
   }
-  if (!ids.length && text) {
-    ids.push(...text.split(/\r?\n/).map(s => s.trim()).filter(Boolean));
-  }
-  return [...new Set(ids)];
+  return [...new Set(ids.map(id => id.trim()).filter(Boolean))];
 }

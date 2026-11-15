@@ -119,7 +119,7 @@ export const SettingsView = {
             </select>
           </label>
           <label class="field" v-if="importData?.encrypted">备份密码 <input type="password" v-model="importPw"></label>
-          <button class="btn danger" :disabled="importMode==='overwrite' && !confirmOverwrite" @click="doImport">
+          <button class="btn danger" :disabled="importBusy || (importMode==='overwrite' && !confirmOverwrite)" @click="doImport">
             <k-icon name="download"></k-icon>{{ importMode === "overwrite" ? "确认覆盖导入" : "开始合并导入" }}
           </button>
           <label class="field" v-if="importMode==='overwrite'" style="display:flex; align-items:center; gap:8px; margin-top:10px">
@@ -149,6 +149,7 @@ export const SettingsView = {
     sched: { enabled: false, balance_interval_hours: 12, model_interval_hours: 24 },
     encOpen: false, encPw: "",
     importFile: null, importData: null, importMode: "merge", importPw: "", confirmOverwrite: false,
+    fileSeq: 0, importBusy: false,
     busy: false,
   }),
   async created() { await this.load(); },
@@ -237,21 +238,28 @@ export const SettingsView = {
       } catch (e) { this.$toast(e.message, "err"); }
     },
     async pickFile(ev) {
+      const seq = ++this.fileSeq;
       const file = ev.target.files[0];
-      if (!file) { this.importFile = null; return; }
+      this.importFile = null; this.importData = null;
+      this.confirmOverwrite = false; this.importPw = "";
+      if (!file) return;
       try {
-        this.importData = JSON.parse(await file.text());
-        if (this.importData.format !== "keyfolio-backup") {
+        const data = JSON.parse(await file.text());
+        if (seq !== this.fileSeq) return;
+        if (data?.format !== "keyfolio-backup") {
           this.$toast("不是 Keyfolio 备份文件", "err");
-          this.importFile = null; return;
+          return;
         }
+        this.importData = data;
         this.importFile = file;
       } catch {
-        this.$toast("文件解析失败", "err");
-        this.importFile = null;
+        if (seq === this.fileSeq) this.$toast("文件解析失败", "err");
       }
     },
     async doImport() {
+      if (this.importBusy) return;
+      this.importBusy = true;
+      const fileSeq = this.fileSeq;
       try {
         const r = await api.post("/api/backup/import", {
           backup: this.importData, mode: this.importMode, password: this.importPw,
@@ -259,11 +267,18 @@ export const SettingsView = {
         if (r.relogin) {
           this.$toast("覆盖导入完成，需要重新登录", "ok");
           window.dispatchEvent(new CustomEvent("kf:unauthorized"));
+        } else if (r.mode === "overwrite") {
+          this.$toast("覆盖导入完成", "ok");
+          await this.load();
         } else {
           this.$toast(`合并完成：渠道 +${r.channels}，Key +${r.keys}，模型 +${r.models}`, "ok");
         }
-        this.importFile = null; this.importData = null;
+        if (fileSeq === this.fileSeq) {
+          this.importFile = null; this.importData = null;
+          this.confirmOverwrite = false; this.importPw = "";
+        }
       } catch (e) { this.$toast(e.message, "err"); }
+      finally { this.importBusy = false; }
     },
     async logout() {
       try { await api.post("/api/auth/logout"); } catch {}

@@ -1,7 +1,7 @@
 """Anthropic Claude：模型列表 /v1/models + 消息接口测试（余额官方不开放，手动填）。"""
 from urllib.parse import urlencode
 
-from .base import get_json, normalize_base, post_json
+from .base import AdapterError, get_json, normalize_base, post_json
 
 
 def _headers(key: str) -> dict:
@@ -26,7 +26,7 @@ async def fetch_models(base_url: str, key: str) -> list[str]:
         data = await get_json(f"{url}?{urlencode(query)}", key, headers=_headers(key))
         items = data.get("data") if isinstance(data, dict) else data
         if not isinstance(items, list):
-            break
+            raise AdapterError("响应里没有模型列表，接口可能已变更或 Base URL 不正确")
         ids.extend(str(m["id"]) for m in items if isinstance(m, dict) and m.get("id"))
         if not isinstance(data, dict) or not data.get("has_more"):
             break

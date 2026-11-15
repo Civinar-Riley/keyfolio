@@ -1,7 +1,7 @@
 """Google Gemini：模型列表 /v1beta/models + generateContent 测试（余额手动填）。"""
 from urllib.parse import urlencode
 
-from .base import get_json, normalize_base, post_json
+from .base import AdapterError, api_base, get_json, post_json
 
 
 def _headers(key: str) -> dict:
@@ -9,10 +9,7 @@ def _headers(key: str) -> dict:
 
 
 def _beta_url(base_url: str, suffix: str) -> str:
-    base = normalize_base(base_url)
-    if base.lower().endswith("/v1beta"):
-        return base + suffix
-    return base + "/v1beta" + suffix
+    return api_base(base_url, "v1beta") + suffix
 
 
 async def fetch_models(base_url: str, key: str) -> list[str]:
@@ -26,7 +23,7 @@ async def fetch_models(base_url: str, key: str) -> list[str]:
         data = await get_json(f"{url}?{urlencode(query)}", key, headers=_headers(key))
         items = data.get("models") if isinstance(data, dict) else data
         if not isinstance(items, list):
-            break
+            raise AdapterError("响应里没有模型列表，接口可能已变更或 Base URL 不正确")
         for m in items:
             if isinstance(m, dict) and m.get("name"):
                 ids.append(str(m["name"]).split("models/", 1)[-1])

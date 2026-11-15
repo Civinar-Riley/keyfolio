@@ -106,9 +106,10 @@ export const ExportView = {
     channels: [], templates: [], placeholders: [],
     selChannel: "", selKey: "", selTemplate: "",
     result: "", resultName: "config.json",
-    form: null,
+    form: null, renderSeq: 0, loadSeq: 0, disposed: false,
   }),
   computed: {
+    renderInput() { return JSON.stringify([this.selChannel, this.selKey, this.selTemplate]); },
     selChannelKeys() {
       const c = this.channels.find(c => c.id === Number(this.selChannel));
       return c ? c.keys : [];
@@ -117,29 +118,43 @@ export const ExportView = {
   async created() {
     await this.load();
   },
+  beforeUnmount() { this.disposed = true; },
+  watch: {
+    renderInput: {
+      flush: "sync",
+      handler() { this.clearResult(); },
+    },
+  },
   methods: {
+    clearResult() { this.renderSeq++; this.result = ""; },
     async load() {
+      const seq = ++this.loadSeq;
       const [ch, tp] = await Promise.all([api.get("/api/channels"), api.get("/api/templates")]);
+      if (this.disposed || seq !== this.loadSeq) return;
       this.channels = ch.channels;
       this.templates = tp.templates;
       this.placeholders = tp.placeholders;
-      if (!this.selChannel && this.channels.length) this.selChannel = this.channels[0].id;
+      if (!this.channels.some(c => c.id === Number(this.selChannel))) this.selChannel = this.channels[0]?.id || "";
       const keys = this.selChannelKeys;
-      if (!this.selKey && keys.length) this.selKey = keys[0].id;
-      if (!this.selTemplate && this.templates.length) this.selTemplate = this.templates[0].id;
+      if (!keys.some(k => k.id === Number(this.selKey))) this.selKey = keys[0]?.id || "";
+      if (!this.templates.some(t => t.id === Number(this.selTemplate))) this.selTemplate = this.templates[0]?.id || "";
     },
     onChannelChange() {
       const keys = this.selChannelKeys;
       this.selKey = keys.length ? keys[0].id : "";
     },
     async render() {
+      const input = this.renderInput;
+      const seq = ++this.renderSeq;
+      const tpl = this.templates.find(t => t.id === Number(this.selTemplate));
+      const key = this.selChannelKeys.find(k => k.id === Number(this.selKey));
+      this.result = "";
       try {
         const r = await api.post("/api/templates/render", {
           template_id: Number(this.selTemplate), key_id: Number(this.selKey),
         });
+        if (this.disposed || seq !== this.renderSeq || input !== this.renderInput) return;
         this.result = r.rendered;
-        const tpl = this.templates.find(t => t.id === Number(this.selTemplate));
-        const key = this.selChannelKeys.find(k => k.id === Number(this.selKey));
         this.resultName = r.is_json
           ? `${(tpl?.client_type || "config")}-${key?.name || "key"}.json`
           : `${(tpl?.client_type || "config")}-${key?.name || "key"}.txt`;
@@ -169,6 +184,7 @@ export const ExportView = {
         if (this.form.id) await api.put(`/api/templates/${this.form.id}`, this.form);
         else await api.post("/api/templates", this.form);
         this.form = null;
+        this.clearResult();
         await this.load();
         this.$toast("模板已保存", "ok");
       } catch (e) { this.$toast(e.message, "err"); }

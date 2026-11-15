@@ -32,12 +32,12 @@ Keyfolio 用一个本地 FastAPI 服务加 SQLite 把这些收进一个界面。
 - 测 Key 用 `GET /v1/models`（无消耗）；可选发一条 `max_tokens=1` 的真实请求验证推理，新推理模型自动改用 `max_completion_tokens`
 - 拉取远端模型列表，对比新增 / 消失 / 重新出现后确认同步；消失的模型默认停用不删，手动停用的不会被自动启用
 - 余额按渠道类型适配（DeepSeek / SiliconFlow / OpenRouter 等），失败走通用只读探测，再不行给出具体原因并支持手动填写；每次查询记入历史
-- 定时任务可按间隔自动查余额、同步模型；自动查询不会覆盖手动填写的到期日与币种
+- 定时任务可按间隔自动查余额、同步模型；自动查询未返回到期日或币种时，保留已填写的信息
 
 ### 看板与导出
 
 - 看板汇总全部 Key 的余额、状态与到期情况，按分组 / 类型筛选、按余额 / 更新时间排序；点任意一行查看 7 / 30 / 90 / 365 天的余额趋势
-- 占位符模板导出：`{name}`、`{base_url}`、`{api_base}`、`{key}`、`{model}`、`{models}` 等；内置 SillyTavern / ZCode / dsh / .env / cURL / OpenAI SDK / 通用 JSON，模板可增删改
+- 占位符模板导出：`{channel_name}`、`{base_url}`、`{api_base}`、`{key}`、`{model}`、`{models}` 等；内置 SillyTavern / ZCode / dsh / .env / cURL / OpenAI SDK / 通用 JSON，模板可增删改
 - `{api_base}` 只在缺少版本段时补齐，Base URL 带不带 `/v1` 都不会拼重
 
 ### 安全与备份
@@ -138,6 +138,10 @@ docker-compose.yml
 pip install -r requirements.txt
 python main.py                 # 开发服务
 python scripts/e2e_native.py  # 端到端测试（自行启动 39001 端口的假平台）
+python scripts/test_regressions.py  # 渠道、模型解析与模板导出回归
+python scripts/test_backup_regressions.py  # 认证与备份回归
+python scripts/test_adapters_scheduler.py  # 平台适配与定时任务回归
+node scripts/test_frontend.mjs  # 前端状态与异步交互回归
 ```
 
 前端没有构建步骤：改 `app/static/` 里的文件，刷新浏览器即可。Vue 与 Chart.js 已 vendored，不需要 npm。

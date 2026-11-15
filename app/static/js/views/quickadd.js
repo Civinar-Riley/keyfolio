@@ -90,9 +90,10 @@ export const QuickAddView = {
     form: { name: "", type: "gateway", base_url: "", key: "" },
     channelTypes: [],
     verifyResult: null,
-    parseTimer: null,
+    parseTimer: null, verifySeq: 0, disposed: false,
   }),
   computed: {
+    verificationInput() { return JSON.stringify([this.form.base_url, this.form.key, this.form.type]); },
     hostHint() {
       try { return new URL(this.form.base_url).hostname; } catch { return ""; }
     },
@@ -103,9 +104,20 @@ export const QuickAddView = {
     const r = await api.get("/api/channels");
     this.channelTypes = r.channel_types;
   },
+  beforeUnmount() {
+    this.disposed = true;
+    clearTimeout(this.parseTimer);
+    this.verifySeq++;
+  },
   watch: {
+    verificationInput: {
+      flush: "sync",
+      handler() { this.verifySeq++; this.verifyResult = null; },
+    },
     raw(text) {
       clearTimeout(this.parseTimer);
+      this.verifySeq++;
+      this.verifyResult = null;
       if (!text.trim()) { this.parsed = null; return; }
       this.parseTimer = setTimeout(() => this.doParse(text), 400);
     },
@@ -114,7 +126,7 @@ export const QuickAddView = {
     async doParse(text) {
       try {
         const r = await api.post("/api/quickadd/parse", { text });
-        if (text !== this.raw) return; // 已被更新的输入取代
+        if (this.disposed || text !== this.raw) return; // 已被更新的输入取代
         this.parsed = r;
         this.form.base_url = r.base_url;
         this.form.key = r.key;
@@ -124,12 +136,17 @@ export const QuickAddView = {
       } catch (e) { this.$toast(e.message, "err"); }
     },
     async verify() {
+      const input = this.verificationInput;
+      const seq = ++this.verifySeq;
       this.verifyResult = null;
       try {
-        this.verifyResult = await api.post("/api/quickadd/verify", {
+        const result = await api.post("/api/quickadd/verify", {
           base_url: this.form.base_url, key: this.form.key, type: this.form.type,
         });
-      } catch (e) { this.verifyResult = { ok: false, error: e.message }; }
+        if (!this.disposed && seq === this.verifySeq && input === this.verificationInput) this.verifyResult = result;
+      } catch (e) {
+        if (!this.disposed && seq === this.verifySeq && input === this.verificationInput) this.verifyResult = { ok: false, error: e.message };
+      }
     },
     async save() {
       try {
